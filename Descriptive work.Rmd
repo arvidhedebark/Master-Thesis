@@ -1,0 +1,2980 @@
+---
+title: "Descriptive stuff"
+author: "Arvid Hedebark"
+date: "2024-02-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Read in packages and setting seed
+```{r}
+start_time <- Sys.time()
+library(tidyverse)
+library(sna)
+library(network)
+library(ggpubr)
+library(openxlsx)
+library(insight)
+set.seed(007)
+```
+
+# Specify number of simulated graphs
+```{r}
+sim_n <- 10000
+```
+
+
+# Specify comprimated centrality and estimator functions
+
+```{r}
+degree_centrality <- function(array){
+  centralization(array, mode = "graph", FUN = degree)
+}
+closeness_centrality <- function(array){
+  centralization(array, mode = "graph", FUN = closeness)
+}
+betweenness_centrality <- function(array){
+  centralization(array, mode = "graph", FUN = betweenness)
+}
+
+statistics_estimator <- function(array){
+  Degree <- apply(array, 1, FUN = degree_centrality)
+  Closeness <- apply(array, 1, FUN = closeness_centrality)
+  Betweenness <- apply(array, 1, FUN = betweenness_centrality)
+  Triads <- triad.census(array, mode = "graph")[,4]
+  
+  dat <- data.frame(Degree, Closeness, Betweenness, Triads)
+  
+  return(dat)
+}
+```
+
+# SIREN (undirected)
+
+## Reading in data and some small calculations
+```{r}
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Raw Data/SIREN")
+adj_m <- read.csv("siren.csv",  header = T, row.names = 1)
+class(adj_m)
+rownames(adj_m) <- colnames(adj_m) <- tolower(colnames(adj_m))
+adj <- as.matrix(adj_m)
+isSymmetric.matrix(adj)
+```
+
+Some small calculation
+```{r}
+#n <- 44
+# Density
+#sum(adj_m)/(n*(n-1))
+
+# Degree distribution
+# plot(table(colSums(adj_m)))
+```
+## Network object
+```{r}
+net <- as.network(adj, directed = FALSE)
+class(net)
+nodes <- nrow(adj)
+edges <- network::network.edgecount(net)
+
+# Save the network object
+# setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Processed data")
+# saveRDS(net, file = "siren.rds")
+```
+
+### Plotting our network compared to a randomised network
+```{r}
+siren_plot <- plot(net, main = "Siren")
+par(mfrow = c(1,2))
+plot(net, main = "Siren")  #, displaylabels = TRUE)
+rnet <- as.network(rgnm(n = 1, nv = nodes, m = edges, mode = "graph"), directed = FALSE)
+plot(rnet, main = "Random Graph")  #, displaylabels = TRUE)
+```
+
+## Simulation
+```{r}
+sim_graphs <- rgnm(n = sim_n, nv = nodes, m = edges, mode = "graph")
+```
+
+### Degree distribution
+
+```{r}
+obs_degree <- degree(adj, gmode='graph')
+
+# What is g here?
+degrees <-degree(sim_graphs,g=c(1:sim_n), gmode='graph')# you can calculate the degree distributions for all graphs
+
+max.deg <- max(obs_degree, degrees)
+
+deg.sist <- cbind( matrix( colSums(degrees==0),sim_n,1),
+                  t(apply(degrees,2,function(x) tabulate(x, nbins=max.deg) ) ) )# when tabulating we need to add the number of isolates 
+matplot(c(0:(max.deg)), t(deg.sist) ,
+        type ='l',
+        main='Siren: Simulated degree dist. vs observed degree dist.',
+        xlab = "Edge count",
+        ylab = "Frequency")
+
+obs_freq <- as.data.frame(table(obs_degree))
+# Define the range of numbers
+range_of_numbers <- 0:(max.deg+2)
+# Create an empty dataframe to hold the final frequency table
+freq_table <- data.frame(number = range_of_numbers, frequency = 0)
+# Update the frequencies for existing numbers
+freq_table$frequency[freq_table$number %in% obs_freq$obs_degree] <- obs_freq$Freq
+
+lines(freq_table$number, freq_table$frequency,col='grey',lwd=4)
+```
+
+
+### Calculate centrality and triad measures
+```{r}
+# Create data object with statistics for sim graphs
+dat <- statistics_estimator(sim_graphs)
+# summary(dat)
+# boxplot(dat %>% select(-Triads))
+
+#Calculate observed statistics
+degree_obs <- degree_centrality(net)
+closeness_obs <- closeness_centrality(net)
+betweenness_obs <- betweenness_centrality(net)
+triad_obs <- triad.census(net, mode = "graph")[,4]
+
+
+# Creating dataframe for the z-score for the observed statistics
+obs_z_score <- dat %>% 
+  summarise(
+    "Network" = "Siren",
+    "Type" = "Criminal",
+    "Nodes" = nodes,
+    "Density" = network.density(net),
+    "Degree_std" = (degree_obs-mean(Degree))/sd(Degree),
+    "Closeness_std" = (closeness_obs-mean(Closeness))/sd(Closeness),
+    "Betweenness_std" = (betweenness_obs-mean(Betweenness))/sd(Betweenness),
+    "Triadic_std" = (triad_obs - mean(Triads)) / sd(Triads)
+    )
+
+obs_z_score
+
+# std <- dat %>% 
+#   mutate(
+#     degree_std = (Degree - mean(Degree))/sd(Degree),
+#     closeness_std = (Closeness - mean(Closeness))/sd(Closeness),
+#     betweenness_std = (Betweenness - mean(Betweenness))/sd(Betweenness),
+#     triad_std = (Triads - mean(Triads)) / sd(Triads)
+#     ) %>% 
+#   select(degree_std, closeness_std, betweenness_std, triad_std)
+
+# boxplot(std)
+```
+
+
+
+
+
+
+
+
+# CIELNET (directed)
+
+## Reading in data and some small calculations
+```{r}
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Raw Data/CIELNET")
+adj_m <- read.csv("CIELNET.csv",  header = T, row.names = 1)
+class(adj_m)
+rownames(adj_m) <- colnames(adj_m) <- tolower(colnames(adj_m))
+adj <- as.matrix(adj_m)
+isSymmetric.matrix(adj)
+```
+
+
+
+Some small calculation
+```{r}
+# Network Graph
+# plot(as.network(adj, directed = TRUE)) #, vertex.cex = degree(net)
+```
+### Convering to an undirected graph
+
+```{r}
+igraph_net <- igraph::graph_from_adjacency_matrix(adj, mode = "directed")
+igraph_net <- igraph::as.undirected(igraph_net, mode = "collapse")
+igraph_adj <- as.matrix(igraph::as_adj(igraph_net))
+adj <- igraph_adj
+# plot(as.network(igraph_adj, directed = FALSE))
+isSymmetric.matrix(adj)
+```
+
+```{r}
+# n <- nrow(adj)
+# Density
+# sum(adj)/(n*(n-1))
+
+# Degree distribution
+# plot(table(colSums(adj)))
+```
+
+
+
+## Network object
+```{r}
+net <- as.network(adj, directed = FALSE)
+class(net)
+nodes <- nrow(adj)
+edges <- network::network.edgecount(net)
+
+# Save the network object
+# setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Processed data")
+# saveRDS(net, file = "cielnet.rds")
+```
+
+### Plotting our network compared to a randomised network
+```{r}
+cielnet_plot <- plot(net, main = "Cielnet")
+par(mfrow = c(1,2))
+plot(net, main = "Cielnet")  #, displaylabels = TRUE)
+rnet <- as.network(rgnm(n = 1, nv = nodes, m = edges, mode = "graph"), directed = FALSE)
+plot(rnet, main = "Random Graph")  #, displaylabels = TRUE)
+```
+
+## Simulation
+```{r}
+sim_graphs <- rgnm(n = sim_n, nv = nodes, m = edges, mode = "graph")
+```
+
+### Degree distribution
+
+```{r}
+obs_degree <- degree(adj, gmode='graph')
+
+# What is g here?
+degrees <-degree(sim_graphs,g=c(1:sim_n), gmode='graph')# you can calculate the degree distributions for all graphs
+
+max.deg <- max(obs_degree, degrees)
+
+deg.sist <- cbind( matrix( colSums(degrees==0),sim_n,1),
+                  t(apply(degrees,2,function(x) tabulate(x, nbins=max.deg) ) ) )# when tabulating we need to add the number of isolates 
+matplot(c(0:(max.deg)), t(deg.sist) ,
+        type ='l',
+        main='Cielnet: Simulated degree dist. vs observed degree dist.',
+        xlab = "Edge count",
+        ylab = "Frequency")
+
+obs_freq <- as.data.frame(table(obs_degree))
+# Define the range of numbers
+range_of_numbers <- 0:(max.deg+2)
+# Create an empty dataframe to hold the final frequency table
+freq_table <- data.frame(number = range_of_numbers, frequency = 0)
+# Update the frequencies for existing numbers
+freq_table$frequency[freq_table$number %in% obs_freq$obs_degree] <- obs_freq$Freq
+
+lines(freq_table$number, freq_table$frequency,col='grey',lwd=4)
+```
+
+
+### Calculate centrality and triad measures
+```{r}
+# Create data object with statistics for sim graphs
+dat <- statistics_estimator(sim_graphs)
+# summary(dat)
+# boxplot(dat %>% select(-Triads))
+
+#Calculate observed statistics
+degree_obs <- degree_centrality(net)
+closeness_obs <- closeness_centrality(net)
+betweenness_obs <- betweenness_centrality(net)
+triad_obs <- triad.census(net, mode = "graph")[,4]
+
+# Creating dataframe for the z-score for the observed statistics
+obs_to_add <- dat %>% 
+  summarise(
+    "Network" = "Cielnet",
+    "Type" = "Criminal",
+    "Nodes" = nodes,
+    "Density" = network.density(net),
+    "Degree_std" = (degree_obs-mean(Degree))/sd(Degree),
+    "Closeness_std" = (closeness_obs-mean(Closeness))/sd(Closeness),
+    "Betweenness_std" = (betweenness_obs-mean(Betweenness))/sd(Betweenness),
+    "Triadic_std" = (triad_obs - mean(Triads)) / sd(Triads)
+    )
+obs_to_add
+
+obs_z_score <- obs_z_score %>% 
+  add_row(obs_to_add)
+
+# std <- dat %>% 
+#   mutate(
+#     degree_std = (Degree - mean(Degree))/sd(Degree),
+#     closeness_std = (Closeness - mean(Closeness))/sd(Closeness),
+#     betweenness_std = (Betweenness - mean(Betweenness))/sd(Betweenness),
+#     triad_std = (Triads - mean(Triads)) / sd(Triads)
+#     ) %>% 
+#   select(degree_std, closeness_std, betweenness_std, triad_std)
+
+# boxplot(std)
+```
+
+
+# MALI
+
+## Reading in data and some small calculations
+```{r}
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Raw Data/MALI")
+adj_m <- read.csv("MALI.csv",  header = T, row.names = 1)
+class(adj_m)
+adj <- as.matrix(adj_m)
+isSymmetric.matrix(adj)
+```
+
+Some small calculation
+```{r}
+# Network Graph
+# plot(as.network(adj, directed = TRUE)) #, vertex.cex = degree(net)
+```
+### Convering to an undirected graph
+
+```{r}
+igraph_net <- igraph::graph_from_adjacency_matrix(adj, mode = "directed")
+igraph_net <- igraph::as.undirected(igraph_net, mode = "collapse")
+igraph_adj <- as.matrix(igraph::as_adj(igraph_net))
+
+adj <- igraph_adj
+isSymmetric.matrix(adj)
+```
+
+```{r}
+# n <- nrow(adj)
+# # Density
+# sum(adj)/(n*(n-1))
+# 
+# # Degree distribution
+# plot(table(colSums(adj)))
+
+```
+## Network object
+```{r}
+net <- as.network(adj, directed = FALSE)
+class(net)
+nodes <- nrow(adj)
+edges <- network::network.edgecount(net)
+
+# Save the network object
+# setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Processed data")
+# saveRDS(net, file = "mali.rds")
+```
+
+### Plotting our network compared to a randomised network
+```{r}
+mali_plot <- plot(net, main = "Mali")
+par(mfrow = c(1,2))
+plot(net, main = "Mali")  #, displaylabels = TRUE)
+rnet <- as.network(rgnm(n = 1, nv = nodes, m = edges, mode = "graph"), directed = FALSE)
+plot(rnet, main = "Random Graph")  #, displaylabels = TRUE)
+```
+
+## Simulation
+```{r}
+sim_graphs <- rgnm(n = sim_n, nv = nodes, m = edges, mode = "graph")
+```
+
+### Degree distribution
+
+```{r}
+obs_degree <- degree(adj, gmode='graph')
+
+# What is g here?
+degrees <-degree(sim_graphs,g=c(1:sim_n), gmode='graph')# you can calculate the degree distributions for all graphs
+
+max.deg <- max(obs_degree, degrees)
+
+deg.sist <- cbind( matrix( colSums(degrees==0),sim_n,1),
+                  t(apply(degrees,2,function(x) tabulate(x, nbins=max.deg) ) ) )# when tabulating we need to add the number of isolates 
+matplot(c(0:(max.deg)), t(deg.sist) ,
+        type ='l',
+        main='Mali: Simulated degree dist. vs observed degree dist.',
+        xlab = "Edge count",
+        ylab = "Frequency")
+
+obs_freq <- as.data.frame(table(obs_degree))
+# Define the range of numbers
+range_of_numbers <- 0:(max.deg+2)
+# Create an empty dataframe to hold the final frequency table
+freq_table <- data.frame(number = range_of_numbers, frequency = 0)
+# Update the frequencies for existing numbers
+freq_table$frequency[freq_table$number %in% obs_freq$obs_degree] <- obs_freq$Freq
+
+lines(freq_table$number, freq_table$frequency,col='grey',lwd=4)
+```
+
+
+### Calculate centrality and triad measures
+```{r}
+# Create data object with statistics for sim graphs
+dat <- statistics_estimator(sim_graphs)
+# summary(dat)
+# boxplot(dat %>% select(-Triads))
+
+#Calculate observed statistics
+degree_obs <- degree_centrality(net)
+closeness_obs <- closeness_centrality(net)
+betweenness_obs <- betweenness_centrality(net)
+triad_obs <- triad.census(net, mode = "graph")[,4]
+
+# Creating dataframe for the z-score for the observed statistics
+obs_to_add <- dat %>% 
+  summarise(
+    "Network" = "Mali",
+    "Type" = "Terrorist",
+    "Nodes" = nodes,
+    "Density" = network.density(net),
+    "Degree_std" = (degree_obs-mean(Degree))/sd(Degree),
+    "Closeness_std" = (closeness_obs-mean(Closeness))/sd(Closeness),
+    "Betweenness_std" = (betweenness_obs-mean(Betweenness))/sd(Betweenness),
+    "Triadic_std" = (triad_obs - mean(Triads)) / sd(Triads)
+    )
+obs_to_add
+
+obs_z_score <- obs_z_score %>% 
+  add_row(obs_to_add)
+
+# std <- dat %>% 
+#   mutate(
+#     degree_std = (Degree - mean(Degree))/sd(Degree),
+#     closeness_std = (Closeness - mean(Closeness))/sd(Closeness),
+#     betweenness_std = (Betweenness - mean(Betweenness))/sd(Betweenness),
+#     triad_std = (Triads - mean(Triads)) / sd(Triads)
+#     ) %>% 
+#   select(degree_std, closeness_std, betweenness_std, triad_std)
+
+# boxplot(std)
+```
+
+# NATARAJAN (directed)
+
+## Reading in data and some small calculations
+```{r}
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Raw Data/NATARAJAN")
+adj_m <- read.csv("NATARAJAN.csv",  header = T, row.names = 1)
+class(adj_m)
+adj <- as.matrix(adj_m)
+isSymmetric.matrix(adj)
+```
+
+
+Some small calculation
+```{r}
+# Network Graph
+# plot(as.network(adj, directed = TRUE)) #, vertex.cex = degree(net)
+```
+### Convering to an undirected graph
+
+```{r}
+igraph_net <- igraph::graph_from_adjacency_matrix(adj, mode = "directed")
+igraph_net <- igraph::as.undirected(igraph_net, mode = "collapse")
+igraph_adj <- as.matrix(igraph::as_adj(igraph_net))
+
+adj <- igraph_adj
+```
+
+```{r}
+# n <- nrow(adj)
+# Density
+# sum(adj)/(n*(n-1))
+
+# Degree distribution
+#plot(table(colSums(adj)))
+
+```
+## Network object
+```{r}
+net <- as.network(adj, directed = FALSE)
+class(net)
+nodes <- nrow(adj)
+edges <- network::network.edgecount(net)
+
+# Save the network object
+# setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Processed data")
+# saveRDS(net, file = "natarajan.rds")
+```
+
+### Plotting our network compared to a randomised network
+```{r}
+natarjan_plot <- plot(net, main = "Natarjan")
+par(mfrow = c(1,2))
+plot(net, main = "Natarjan")  #, displaylabels = TRUE)
+rnet <- as.network(rgnm(n = 1, nv = nodes, m = edges, mode = "graph"), directed = FALSE)
+plot(rnet, main = "Random Graph")  #, displaylabels = TRUE)
+```
+
+## Simulation
+```{r}
+sim_graphs <- rgnm(n = sim_n, nv = nodes, m = edges, mode = "graph")
+```
+
+### Degree distribution
+
+```{r}
+obs_degree <- degree(adj, gmode='graph')
+
+# What is g here?
+degrees <-degree(sim_graphs,g=c(1:sim_n), gmode='graph')# you can calculate the degree distributions for all graphs
+
+max.deg <- max(obs_degree, degrees)
+
+deg.sist <- cbind( matrix( colSums(degrees==0),sim_n,1),
+                  t(apply(degrees,2,function(x) tabulate(x, nbins=max.deg) ) ) )# when tabulating we need to add the number of isolates 
+matplot(c(0:(max.deg)), t(deg.sist) ,
+        type ='l',
+        main='Natarjan: Simulated degree dist. vs observed degree dist.',
+        xlab = "Edge count",
+        ylab = "Frequency")
+
+obs_freq <- as.data.frame(table(obs_degree))
+# Define the range of numbers
+range_of_numbers <- 0:(max.deg+2)
+# Create an empty dataframe to hold the final frequency table
+freq_table <- data.frame(number = range_of_numbers, frequency = 0)
+# Update the frequencies for existing numbers
+freq_table$frequency[freq_table$number %in% obs_freq$obs_degree] <- obs_freq$Freq
+
+lines(freq_table$number, freq_table$frequency,col='grey',lwd=4)
+```
+
+
+### Calculate centrality and triad measures
+```{r}
+# Create data object with statistics for sim graphs
+dat <- statistics_estimator(sim_graphs)
+# summary(dat)
+# boxplot(dat %>% select(-Triads))
+
+#Calculate observed statistics
+degree_obs <- degree_centrality(net)
+closeness_obs <- closeness_centrality(net)
+betweenness_obs <- betweenness_centrality(net)
+triad_obs <- triad.census(net, mode = "graph")[,4]
+
+# Creating dataframe for the z-score for the observed statistics
+obs_to_add <- dat %>% 
+  summarise(
+    "Network" = "Natarjan",
+    "Type" = "Criminal",
+    "Nodes" = nodes,
+    "Density" = network.density(net),
+    "Degree_std" = (degree_obs-mean(Degree))/sd(Degree),
+    "Closeness_std" = (closeness_obs-mean(Closeness))/sd(Closeness),
+    "Betweenness_std" = (betweenness_obs-mean(Betweenness))/sd(Betweenness),
+    "Triadic_std" = (triad_obs - mean(Triads)) / sd(Triads)
+    )
+obs_to_add
+
+obs_z_score <- obs_z_score %>% 
+  add_row(obs_to_add)
+
+# std <- dat %>% 
+#   mutate(
+#     degree_std = (Degree - mean(Degree))/sd(Degree),
+#     closeness_std = (Closeness - mean(Closeness))/sd(Closeness),
+#     betweenness_std = (Betweenness - mean(Betweenness))/sd(Betweenness),
+#     triad_std = (Triads - mean(Triads)) / sd(Triads)
+#     ) %>% 
+#   select(degree_std, closeness_std, betweenness_std, triad_std)
+
+# boxplot(std)
+```
+
+
+
+# TOGO (undirected)
+
+Says its undirected but the adjecency matrix is not symmetric
+
+## Reading in data and some small calculations
+```{r}
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Raw Data/TOGO")
+adj_m <- read.csv("TOGO.csv",  header = T, row.names = 1)
+class(adj_m)
+adj <- as.matrix(adj_m)
+isSymmetric.matrix(adj)
+```
+
+```{r}
+names <- c()
+for (i in 1:nrow(adj)) {
+  a <- paste("n", i, sep = "")
+  names <- c(names, a)
+}
+
+colnames(adj) <- rownames(adj) <- names
+
+```
+
+
+### Convering to an undirected graph
+
+```{r}
+igraph_net <- igraph::graph_from_adjacency_matrix(adj, mode = "directed")
+igraph_net <- igraph::as.undirected(igraph_net, mode = "collapse")
+igraph_adj <- as.matrix(igraph::as_adj(igraph_net))
+
+adj <- igraph_adj
+isSymmetric.matrix(adj)
+```
+
+```{r}
+# n <- nrow(adj)
+# # Density
+# sum(adj)/(n*(n-1))
+# 
+# # Degree distribution
+# plot(table(colSums(adj)))
+
+```
+## Network object
+```{r}
+net <- as.network(adj, directed = FALSE)
+class(net)
+nodes <- nrow(adj)
+edges <- network::network.edgecount(net)
+
+# Save the network object
+# setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Processed data")
+# saveRDS(net, file = "togo.rds")
+```
+
+### Plotting our network compared to a randomised network
+```{r}
+togo_plot <- plot(net, main = "Togo") 
+par(mfrow = c(1,2))
+plot(net, main = "Togo")  #, displaylabels = TRUE)
+rnet <- as.network(rgnm(n = 1, nv = nodes, m = edges, mode = "graph"), directed = FALSE)
+plot(rnet, main = "Random Graph")  #, displaylabels = TRUE)
+```
+
+## Simulation
+```{r}
+sim_graphs <- rgnm(n = sim_n, nv = nodes, m = edges, mode = "graph")
+```
+
+### Degree distribution
+
+```{r}
+obs_degree <- degree(adj, gmode='graph')
+
+# What is g here?
+degrees <-degree(sim_graphs,g=c(1:sim_n), gmode='graph')# you can calculate the degree distributions for all graphs
+
+max.deg <- max(obs_degree, degrees)
+
+deg.sist <- cbind( matrix( colSums(degrees==0),sim_n,1),
+                  t(apply(degrees,2,function(x) tabulate(x, nbins=max.deg) ) ) )# when tabulating we need to add the number of isolates 
+matplot(c(0:(max.deg)), t(deg.sist) ,
+        type ='l',
+        main='Togo: Simulated degree dist. vs observed degree dist.',
+        xlab = "Edge count",
+        ylab = "Frequency")
+
+obs_freq <- as.data.frame(table(obs_degree))
+# Define the range of numbers
+range_of_numbers <- 0:(max.deg+2)
+# Create an empty dataframe to hold the final frequency table
+freq_table <- data.frame(number = range_of_numbers, frequency = 0)
+# Update the frequencies for existing numbers
+freq_table$frequency[freq_table$number %in% obs_freq$obs_degree] <- obs_freq$Freq
+
+lines(freq_table$number, freq_table$frequency,col='grey',lwd=4)
+```
+
+
+### Calculate centrality and triad measures
+```{r}
+# Create data object with statistics for sim graphs
+dat <- statistics_estimator(sim_graphs)
+# summary(dat)
+# boxplot(dat %>% select(-Triads))
+
+#Calculate observed statistics
+degree_obs <- degree_centrality(net)
+closeness_obs <- closeness_centrality(net)
+betweenness_obs <- betweenness_centrality(net)
+triad_obs <- triad.census(net, mode = "graph")[,4]
+
+# Creating dataframe for the z-score for the observed statistics
+obs_to_add <- dat %>% 
+  summarise(
+    "Network" = "Togo",
+    "Type" = "Criminal",
+    "Nodes" = nodes,
+    "Density" = network.density(net),
+    "Degree_std" = (degree_obs-mean(Degree))/sd(Degree),
+    "Closeness_std" = (closeness_obs-mean(Closeness))/sd(Closeness),
+    "Betweenness_std" = (betweenness_obs-mean(Betweenness))/sd(Betweenness),
+    "Triadic_std" = (triad_obs - mean(Triads)) / sd(Triads)
+    )
+obs_to_add
+
+obs_z_score <- obs_z_score %>% 
+  add_row(obs_to_add)
+
+# std <- dat %>% 
+#   mutate(
+#     degree_std = (Degree - mean(Degree))/sd(Degree),
+#     closeness_std = (Closeness - mean(Closeness))/sd(Closeness),
+#     betweenness_std = (Betweenness - mean(Betweenness))/sd(Betweenness),
+#     triad_std = (Triads - mean(Triads)) / sd(Triads)
+#     ) %>% 
+#   select(degree_std, closeness_std, betweenness_std, triad_std)
+
+# boxplot(std)
+```
+
+
+
+# NOORDIN TOP (undirected)
+
+
+## Reading in data and some small calculations
+```{r}
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Raw Data/NOORDIN TOP")
+adj_m <- read.csv("NOORDINTOP_COMMUNICATIONS.csv",  header = T, row.names = 1)
+class(adj_m)
+adj <- as.matrix(adj_m)
+isSymmetric.matrix(adj)
+```
+
+
+### Convering to an undirected graph
+
+```{r}
+igraph_net <- igraph::graph_from_adjacency_matrix(adj, mode = "directed")
+igraph_net <- igraph::as.undirected(igraph_net, mode = "collapse")
+igraph_adj <- as.matrix(igraph::as_adj(igraph_net))
+
+# plot(as.network(igraph_adj, directed = FALSE))
+adj <- igraph_adj
+isSymmetric.matrix(adj)
+```
+
+```{r}
+
+# n <- nrow(adj)
+# Density
+# sum(adj)/(n*(n-1))
+
+# Degree distribution
+# plot(table(colSums(adj)))
+
+```
+## Network object
+```{r}
+net <- as.network(adj, directed = FALSE)
+class(net)
+nodes <- nrow(adj)
+edges <- network::network.edgecount(net)
+
+# Save the network object
+# setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Processed data")
+# saveRDS(net, file = "noordin_top.rds")
+```
+
+### Plotting our network compared to a randomised network
+```{r}
+noordin_top_plot <- plot(net, main = "NOORDIN TOP") 
+par(mfrow = c(1,2))
+plot(net, main = "NOORDIN TOP")  #, displaylabels = TRUE)
+noordin_top_plot <- plot(net, main = "NOORDIN TOP") 
+rnet <- as.network(rgnm(n = 1, nv = nodes, m = edges, mode = "graph"), directed = FALSE)
+plot(rnet, main = "Random Graph")  #, displaylabels = TRUE)
+```
+
+## Simulation
+```{r}
+sim_graphs <- rgnm(n = sim_n, nv = nodes, m = edges, mode = "graph")
+```
+
+### Degree distribution
+
+```{r}
+obs_degree <- degree(adj, gmode='graph')
+
+# What is g here?
+degrees <-degree(sim_graphs,g=c(1:sim_n), gmode='graph')# you can calculate the degree distributions for all graphs
+
+max.deg <- max(obs_degree, degrees)
+
+deg.sist <- cbind( matrix( colSums(degrees==0),sim_n,1),
+                  t(apply(degrees,2,function(x) tabulate(x, nbins=max.deg) ) ) )# when tabulating we need to add the number of isolates 
+matplot(c(0:(max.deg)), t(deg.sist) ,
+        type ='l',
+        main='NOORDIN TOP: Simulated degree dist. vs observed degree dist.',
+        xlab = "Edge count",
+        ylab = "Frequency")
+
+obs_freq <- as.data.frame(table(obs_degree))
+# Define the range of numbers
+range_of_numbers <- 0:(max.deg+2)
+# Create an empty dataframe to hold the final frequency table
+freq_table <- data.frame(number = range_of_numbers, frequency = 0)
+# Update the frequencies for existing numbers
+freq_table$frequency[freq_table$number %in% obs_freq$obs_degree] <- obs_freq$Freq
+
+lines(freq_table$number, freq_table$frequency,col='grey',lwd=4)
+```
+
+
+### Calculate centrality and triad measures
+```{r}
+# Create data object with statistics for sim graphs
+dat <- statistics_estimator(sim_graphs)
+# summary(dat)
+# boxplot(dat %>% select(-Triads))
+
+#Calculate observed statistics
+degree_obs <- degree_centrality(net)
+closeness_obs <- closeness_centrality(net)
+betweenness_obs <- betweenness_centrality(net)
+triad_obs <- triad.census(net, mode = "graph")[,4]
+
+# Creating dataframe for the z-score for the observed statistics
+obs_to_add <- dat %>% 
+  summarise(
+    "Network" = "NOORDIN TOP",
+    "Type" = "Terrorist",
+    "Nodes" = nodes,
+    "Density" = network.density(net),
+    "Degree_std" = (degree_obs-mean(Degree))/sd(Degree),
+    "Closeness_std" = (closeness_obs-mean(Closeness))/sd(Closeness),
+    "Betweenness_std" = (betweenness_obs-mean(Betweenness))/sd(Betweenness),
+    "Triadic_std" = (triad_obs - mean(Triads)) / sd(Triads)
+    )
+obs_to_add
+
+obs_z_score <- obs_z_score %>% 
+  add_row(obs_to_add)
+
+# std <- dat %>% 
+#   mutate(
+#     degree_std = (Degree - mean(Degree))/sd(Degree),
+#     closeness_std = (Closeness - mean(Closeness))/sd(Closeness),
+#     betweenness_std = (Betweenness - mean(Betweenness))/sd(Betweenness),
+#     triad_std = (Triads - mean(Triads)) / sd(Triads)
+#     ) %>% 
+#   select(degree_std, closeness_std, betweenness_std, triad_std)
+
+# boxplot(std)
+```
+
+# ACERO (?)
+
+Says its undirected but the adjecency matrix is not symmetric
+
+## Reading in data and some small calculations
+```{r}
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Raw Data/ACERO")
+adj_m <- read.csv("ACERO.csv",  header = T) %>% 
+  select(-X)
+class(adj_m)
+adj <- as.matrix(adj_m)
+isSymmetric.matrix(adj)
+```
+
+```{r}
+names <- c()
+for (i in 1:nrow(adj)) {
+  a <- paste("n", i, sep = "")
+  names <- c(names, a)
+}
+
+colnames(adj) <- rownames(adj) <- names
+isSymmetric.matrix(adj)
+class(adj)
+```
+
+
+### Convering to an undirected graph
+
+```{r}
+igraph_net <- igraph::graph_from_adjacency_matrix(adj, mode = "directed")
+igraph_net <- igraph::as.undirected(igraph_net, mode = "collapse")
+igraph_adj <- as.matrix(igraph::as_adj(igraph_net))
+
+# plot(as.network(igraph_adj, directed = FALSE))
+adj <- igraph_adj
+isSymmetric.matrix(adj)
+```
+
+```{r}
+# n <- nrow(adj)
+# Density
+# sum(adj)/(n*(n-1))
+
+# Degree distribution
+# plot(table(colSums(adj)))
+
+```
+## Network object
+```{r}
+net <- as.network(adj, directed = FALSE)
+class(net)
+nodes <- nrow(adj)
+edges <- network::network.edgecount(net)
+
+# Save the network object
+# setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Processed data")
+# saveRDS(net, file = "acero.rds")
+```
+
+### Plotting our network compared to a randomised network
+```{r}
+acero_plot <- plot(net, main = "Acero") 
+par(mfrow = c(1,2))
+plot(net, main = "Acero")  #, displaylabels = TRUE)
+rnet <- as.network(rgnm(n = 1, nv = nodes, m = edges, mode = "graph"), directed = FALSE)
+plot(rnet, main = "Random Graph")  #, displaylabels = TRUE)
+```
+
+## Simulation
+```{r}
+sim_graphs <- rgnm(n = sim_n, nv = nodes, m = edges, mode = "graph")
+```
+
+### Degree distribution
+
+```{r}
+obs_degree <- degree(adj, gmode='graph')
+
+# What is g here?
+degrees <-degree(sim_graphs,g=c(1:sim_n), gmode='graph')# you can calculate the degree distributions for all graphs
+
+max.deg <- max(obs_degree, degrees)
+
+deg.sist <- cbind( matrix( colSums(degrees==0),sim_n,1),
+                  t(apply(degrees,2,function(x) tabulate(x, nbins=max.deg) ) ) )# when tabulating we need to add the number of isolates 
+matplot(c(0:(max.deg)), t(deg.sist) ,
+        type ='l',
+        main='Acero: Simulated degree dist. vs observed degree dist.',
+        xlab = "Edge count",
+        ylab = "Frequency")
+
+obs_freq <- as.data.frame(table(obs_degree))
+# Define the range of numbers
+range_of_numbers <- 0:(max.deg+2)
+# Create an empty dataframe to hold the final frequency table
+freq_table <- data.frame(number = range_of_numbers, frequency = 0)
+# Update the frequencies for existing numbers
+freq_table$frequency[freq_table$number %in% obs_freq$obs_degree] <- obs_freq$Freq
+
+lines(freq_table$number, freq_table$frequency,col='grey',lwd=4)
+```
+
+
+### Calculate centrality and triad measures
+```{r}
+# Create data object with statistics for sim graphs
+dat <- statistics_estimator(sim_graphs)
+# summary(dat)
+# boxplot(dat %>% select(-Triads))
+
+#Calculate observed statistics
+degree_obs <- degree_centrality(net)
+closeness_obs <- closeness_centrality(net)
+betweenness_obs <- betweenness_centrality(net)
+triad_obs <- triad.census(net, mode = "graph")[,4]
+
+# Creating dataframe for the z-score for the observed statistics
+obs_to_add <- dat %>% 
+  summarise(
+    "Network" = "Acero",
+    "Type" = "Criminal",
+    "Nodes" = nodes,
+    "Density" = network.density(net),
+    "Degree_std" = (degree_obs-mean(Degree))/sd(Degree),
+    "Closeness_std" = (closeness_obs-mean(Closeness))/sd(Closeness),
+    "Betweenness_std" = (betweenness_obs-mean(Betweenness))/sd(Betweenness),
+    "Triadic_std" = (triad_obs - mean(Triads)) / sd(Triads)
+    )
+obs_to_add
+
+obs_z_score <- obs_z_score %>% 
+  add_row(obs_to_add)
+
+# std <- dat %>% 
+#   mutate(
+#     degree_std = (Degree - mean(Degree))/sd(Degree),
+#     closeness_std = (Closeness - mean(Closeness))/sd(Closeness),
+#     betweenness_std = (Betweenness - mean(Betweenness))/sd(Betweenness),
+#     triad_std = (Triads - mean(Triads)) / sd(Triads)
+#     ) %>% 
+#   select(degree_std, closeness_std, betweenness_std, triad_std)
+
+# boxplot(std)
+```
+
+
+# JAKE (?)
+
+## Reading in data and some small calculations
+```{r}
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Raw Data/JAKE")
+adj_m <- read.csv("JAKE.csv",  header = T) %>% 
+  select(-X)
+class(adj_m)
+adj <- as.matrix(adj_m)
+isSymmetric.matrix(adj)
+```
+
+```{r}
+names <- c()
+for (i in 1:nrow(adj)) {
+  a <- paste("n", i, sep = "")
+  names <- c(names, a)
+}
+
+colnames(adj) <- rownames(adj) <- names
+isSymmetric.matrix(adj)
+class(adj)
+```
+
+### Convering to an undirected graph
+
+```{r}
+igraph_net <- igraph::graph_from_adjacency_matrix(adj, mode = "directed")
+igraph_net <- igraph::as.undirected(igraph_net, mode = "collapse")
+igraph_adj <- as.matrix(igraph::as_adj(igraph_net))
+
+# plot(as.network(igraph_adj, directed = FALSE))
+adj <- igraph_adj
+isSymmetric.matrix(adj)
+```
+
+```{r}
+
+# n <- nrow(adj)
+# Density
+# sum(adj)/(n*(n-1))
+
+# Degree distribution
+# plot(table(colSums(adj)))
+
+```
+## Network object
+```{r}
+net <- as.network(adj, directed = FALSE)
+class(net)
+nodes <- nrow(adj)
+edges <- network::network.edgecount(net)
+
+# Save the network object
+# setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Processed data")
+# saveRDS(net, file = "jake.rds")
+```
+
+### Plotting our network compared to a randomised network
+```{r}
+jake_plot <- plot(net, main = "Jake")
+par(mfrow = c(1,2))
+plot(net, main = "Jake")  #, displaylabels = TRUE)
+rnet <- as.network(rgnm(n = 1, nv = nodes, m = edges, mode = "graph"), directed = FALSE)
+plot(rnet, main = "Random Graph")  #, displaylabels = TRUE)
+```
+
+## Simulation
+```{r}
+sim_graphs <- rgnm(n = sim_n, nv = nodes, m = edges, mode = "graph")
+```
+
+### Degree distribution
+
+```{r}
+obs_degree <- degree(adj, gmode='graph')
+
+# What is g here?
+degrees <-degree(sim_graphs,g=c(1:sim_n), gmode='graph')# you can calculate the degree distributions for all graphs
+
+max.deg <- max(obs_degree, degrees)
+
+deg.sist <- cbind( matrix( colSums(degrees==0),sim_n,1),
+                  t(apply(degrees,2,function(x) tabulate(x, nbins=max.deg) ) ) )# when tabulating we need to add the number of isolates 
+matplot(c(0:(max.deg)), t(deg.sist) ,
+        type ='l',
+        main='Jake: Simulated degree dist. vs observed degree dist.',
+        xlab = "Edge count",
+        ylab = "Frequency")
+
+obs_freq <- as.data.frame(table(obs_degree))
+# Define the range of numbers
+range_of_numbers <- 0:(max.deg+2)
+# Create an empty dataframe to hold the final frequency table
+freq_table <- data.frame(number = range_of_numbers, frequency = 0)
+# Update the frequencies for existing numbers
+freq_table$frequency[freq_table$number %in% obs_freq$obs_degree] <- obs_freq$Freq
+
+lines(freq_table$number, freq_table$frequency,col='grey',lwd=4)
+```
+
+
+### Calculate centrality and triad measures
+```{r}
+# Create data object with statistics for sim graphs
+dat <- statistics_estimator(sim_graphs)
+# summary(dat)
+# boxplot(dat %>% select(-Triads))
+
+#Calculate observed statistics
+degree_obs <- degree_centrality(net)
+closeness_obs <- closeness_centrality(net)
+betweenness_obs <- betweenness_centrality(net)
+triad_obs <- triad.census(net, mode = "graph")[,4]
+
+# Creating dataframe for the z-score for the observed statistics
+obs_to_add <- dat %>% 
+  summarise(
+    "Network" = "Jake",
+    "Type" = "Criminal",
+    "Nodes" = nodes,
+    "Density" = network.density(net),
+    "Degree_std" = (degree_obs-mean(Degree))/sd(Degree),
+    "Closeness_std" = (closeness_obs-mean(Closeness))/sd(Closeness),
+    "Betweenness_std" = (betweenness_obs-mean(Betweenness))/sd(Betweenness),
+    "Triadic_std" = (triad_obs - mean(Triads)) / sd(Triads)
+    )
+obs_to_add
+
+obs_z_score <- obs_z_score %>% 
+  add_row(obs_to_add)
+
+# std <- dat %>% 
+#   mutate(
+#     degree_std = (Degree - mean(Degree))/sd(Degree),
+#     closeness_std = (Closeness - mean(Closeness))/sd(Closeness),
+#     betweenness_std = (Betweenness - mean(Betweenness))/sd(Betweenness),
+#     triad_std = (Triads - mean(Triads)) / sd(Triads)
+#     ) %>% 
+#   select(degree_std, closeness_std, betweenness_std, triad_std)
+
+# boxplot(std)
+```
+
+
+# JUANES (?)
+
+## Reading in data and some small calculations
+```{r}
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Raw Data/JUANES")
+adj_m <- read.csv("JUANES.csv",  header = T) %>% 
+  select(-X)
+class(adj_m)
+adj <- as.matrix(adj_m)
+isSymmetric.matrix(adj)
+```
+
+```{r}
+names <- c()
+for (i in 1:nrow(adj)) {
+  a <- paste("n", i, sep = "")
+  names <- c(names, a)
+}
+
+colnames(adj) <- rownames(adj) <- names
+isSymmetric.matrix(adj)
+class(adj)
+```
+
+### Convering to an undirected graph
+
+```{r}
+igraph_net <- igraph::graph_from_adjacency_matrix(adj, mode = "directed")
+igraph_net <- igraph::as.undirected(igraph_net, mode = "collapse")
+igraph_adj <- as.matrix(igraph::as_adj(igraph_net))
+
+# plot(as.network(igraph_adj, directed = FALSE))
+sum(adj)
+sum(igraph_adj)
+adj <- igraph_adj
+isSymmetric.matrix(adj)
+```
+
+```{r}
+# n <- nrow(adj)
+# Density
+# sum(adj)/(n*(n-1))
+
+# Degree distribution
+# plot(table(colSums(adj)))
+
+```
+## Network object
+```{r}
+net <- as.network(adj, directed = FALSE)
+class(net)
+nodes <- nrow(adj)
+edges <- network::network.edgecount(net)
+
+# Save the network object
+# setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Processed data")
+# saveRDS(net, file = "juanes.rds")
+```
+
+### Plotting our network compared to a randomised network
+```{r}
+juanes_plot <- plot(net, main = "Togo")  #, displaylabels = TRUE)
+par(mfrow = c(1,2))
+plot(net, main = "Togo")  #, displaylabels = TRUE)
+rnet <- as.network(rgnm(n = 1, nv = nodes, m = edges, mode = "graph"), directed = FALSE)
+plot(rnet, main = "Random Graph")  #, displaylabels = TRUE)
+```
+
+## Simulation
+```{r}
+sim_graphs <- rgnm(n = sim_n, nv = nodes, m = edges, mode = "graph")
+```
+
+### Degree distribution
+
+```{r}
+obs_degree <- degree(adj, gmode='graph')
+
+# What is g here?
+degrees <-degree(sim_graphs,g=c(1:sim_n), gmode='graph')# you can calculate the degree distributions for all graphs
+
+max.deg <- max(obs_degree, degrees)
+
+deg.sist <- cbind( matrix( colSums(degrees==0),sim_n,1),
+                  t(apply(degrees,2,function(x) tabulate(x, nbins=max.deg) ) ) )# when tabulating we need to add the number of isolates 
+matplot(c(0:(max.deg)), t(deg.sist) ,
+        type ='l',
+        main='Juanes: Simulated degree dist. vs observed degree dist.',
+        xlab = "Edge count",
+        ylab = "Frequency")
+
+obs_freq <- as.data.frame(table(obs_degree))
+# Define the range of numbers
+range_of_numbers <- 0:(max.deg+2)
+# Create an empty dataframe to hold the final frequency table
+freq_table <- data.frame(number = range_of_numbers, frequency = 0)
+# Update the frequencies for existing numbers
+freq_table$frequency[freq_table$number %in% obs_freq$obs_degree] <- obs_freq$Freq
+
+lines(freq_table$number, freq_table$frequency,col='grey',lwd=4)
+```
+
+
+### Calculate centrality and triad measures
+```{r}
+# Create data object with statistics for sim graphs
+dat <- statistics_estimator(sim_graphs)
+# summary(dat)
+# boxplot(dat %>% select(-Triads))
+
+#Calculate observed statistics
+degree_obs <- degree_centrality(net)
+closeness_obs <- closeness_centrality(net)
+betweenness_obs <- betweenness_centrality(net)
+triad_obs <- triad.census(net, mode = "graph")[,4]
+
+# Creating dataframe for the z-score for the observed statistics
+obs_to_add <- dat %>% 
+  summarise(
+    "Network" = "Juanes",
+    "Type" = "Criminal",
+    "Nodes" = nodes,
+    "Density" = network.density(net),
+    "Degree_std" = (degree_obs-mean(Degree))/sd(Degree),
+    "Closeness_std" = (closeness_obs-mean(Closeness))/sd(Closeness),
+    "Betweenness_std" = (betweenness_obs-mean(Betweenness))/sd(Betweenness),
+    "Triadic_std" = (triad_obs - mean(Triads)) / sd(Triads)
+    )
+obs_to_add
+
+obs_z_score <- obs_z_score %>% 
+  add_row(obs_to_add)
+
+# std <- dat %>% 
+#   mutate(
+#     degree_std = (Degree - mean(Degree))/sd(Degree),
+#     closeness_std = (Closeness - mean(Closeness))/sd(Closeness),
+#     betweenness_std = (Betweenness - mean(Betweenness))/sd(Betweenness),
+#     triad_std = (Triads - mean(Triads)) / sd(Triads)
+#     ) %>% 
+#   select(degree_std, closeness_std, betweenness_std, triad_std)
+
+# boxplot(std)
+```
+
+
+# MAMBO (?)
+
+Says its undirected but the adjecency matrix is not symmetric
+
+## Reading in data and some small calculations
+```{r}
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Raw Data/MAMBO")
+adj_m <- read.csv("MAMBO.csv",  header = T) %>% 
+  select(-X)
+class(adj_m)
+adj <- as.matrix(adj_m)
+isSymmetric.matrix(adj)
+```
+
+```{r}
+names <- c()
+for (i in 1:nrow(adj)) {
+  a <- paste("n", i, sep = "")
+  names <- c(names, a)
+}
+
+colnames(adj) <- rownames(adj) <- names
+isSymmetric.matrix(adj)
+class(adj)
+```
+
+### Convering to an undirected graph
+
+```{r}
+igraph_net <- igraph::graph_from_adjacency_matrix(adj, mode = "directed")
+igraph_net <- igraph::as.undirected(igraph_net, mode = "collapse")
+igraph_adj <- as.matrix(igraph::as_adj(igraph_net))
+
+sum(igraph_adj)- sum(adj)
+adj <- igraph_adj
+isSymmetric.matrix(adj)
+```
+
+```{r}
+# n <- nrow(adj)
+# Density
+# sum(adj)/(n*(n-1))
+
+# Degree distribution
+# plot(table(colSums(adj)))
+
+```
+## Network object
+```{r}
+net <- as.network(adj, directed = FALSE)
+class(net)
+nodes <- nrow(adj)
+edges <- network::network.edgecount(net)
+
+# Save the network object
+# setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Processed data")
+# saveRDS(net, file = "mambo.rds")
+```
+
+### Plotting our network compared to a randomised network
+```{r}
+mambo_plot <- plot(net, main = "Mambo")  #, displaylabels = TRUE)
+par(mfrow = c(1,2))
+plot(net, main = "Mambo")  #, displaylabels = TRUE)
+rnet <- as.network(rgnm(n = 1, nv = nodes, m = edges, mode = "graph"), directed = FALSE)
+plot(rnet, main = "Random Graph")  #, displaylabels = TRUE)
+```
+
+## Simulation
+```{r}
+sim_graphs <- rgnm(n = sim_n, nv = nodes, m = edges, mode = "graph")
+```
+
+### Degree distribution
+
+```{r}
+obs_degree <- degree(adj, gmode='graph')
+
+# What is g here?
+degrees <-degree(sim_graphs,g=c(1:sim_n), gmode='graph')# you can calculate the degree distributions for all graphs
+
+max.deg <- max(obs_degree, degrees)
+
+deg.sist <- cbind( matrix( colSums(degrees==0),sim_n,1),
+                  t(apply(degrees,2,function(x) tabulate(x, nbins=max.deg) ) ) )# when tabulating we need to add the number of isolates 
+matplot(c(0:(max.deg)), t(deg.sist) ,
+        type ='l',
+        main='Mambo: Simulated degree dist. vs observed degree dist.',
+        xlab = "Edge count",
+        ylab = "Frequency")
+
+obs_freq <- as.data.frame(table(obs_degree))
+# Define the range of numbers
+range_of_numbers <- 0:(max.deg+2)
+# Create an empty dataframe to hold the final frequency table
+freq_table <- data.frame(number = range_of_numbers, frequency = 0)
+# Update the frequencies for existing numbers
+freq_table$frequency[freq_table$number %in% obs_freq$obs_degree] <- obs_freq$Freq
+
+lines(freq_table$number, freq_table$frequency,col='grey',lwd=4)
+```
+
+
+### Calculate centrality and triad measures
+```{r}
+# Create data object with statistics for sim graphs
+dat <- statistics_estimator(sim_graphs)
+# summary(dat)
+# boxplot(dat %>% select(-Triads))
+
+#Calculate observed statistics
+degree_obs <- degree_centrality(net)
+closeness_obs <- closeness_centrality(net)
+betweenness_obs <- betweenness_centrality(net)
+triad_obs <- triad.census(net, mode = "graph")[,4]
+
+# Creating dataframe for the z-score for the observed statistics
+obs_to_add <- dat %>% 
+  summarise(
+    "Network" = "Mambo",
+    "Type" = "Criminal",
+    "Nodes" = nodes,
+    "Density" = network.density(net),
+    "Degree_std" = (degree_obs-mean(Degree))/sd(Degree),
+    "Closeness_std" = (closeness_obs-mean(Closeness))/sd(Closeness),
+    "Betweenness_std" = (betweenness_obs-mean(Betweenness))/sd(Betweenness),
+    "Triadic_std" = (triad_obs - mean(Triads)) / sd(Triads)
+    )
+obs_to_add
+
+obs_z_score <- obs_z_score %>% 
+  add_row(obs_to_add)
+
+# std <- dat %>% 
+#   mutate(
+#     degree_std = (Degree - mean(Degree))/sd(Degree),
+#     closeness_std = (Closeness - mean(Closeness))/sd(Closeness),
+#     betweenness_std = (Betweenness - mean(Betweenness))/sd(Betweenness),
+#     triad_std = (Triads - mean(Triads)) / sd(Triads)
+#     ) %>% 
+#   select(degree_std, closeness_std, betweenness_std, triad_std)
+
+# boxplot(std)
+```
+
+# Pre Al-Quaeda WoT
+
+## Reading in data and some small calculations
+```{r}
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Raw Data/ALQUAEDA")
+adj_m <- read.csv("prewot_matrix.csv", header = T, sep = ";") %>% 
+  select(-X)
+class(adj_m)
+adj <- as.matrix(adj_m)
+isSymmetric.matrix(adj)
+```
+
+```{r}
+names <- c()
+for (i in 1:nrow(adj)) {
+  a <- paste("n", i, sep = "")
+  names <- c(names, a)
+}
+
+colnames(adj) <- rownames(adj) <- names
+isSymmetric.matrix(adj)
+class(adj)
+
+# One obs on diagonal is 1 so setting them all to zero
+diag(adj) <- 0
+```
+
+## Network object
+```{r}
+net <- as.network(adj, directed = FALSE)
+class(net)
+nodes <- nrow(adj)
+edges <- network::network.edgecount(net)
+
+# Save the network object
+# setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Processed data")
+# saveRDS(net, file = "pre_al_quaeda.rds")
+```
+
+
+### Plotting our network compared to a randomised network
+```{r}
+pre_wot_plot <- plot(net, main = "Mambo")  #, displaylabels = TRUE)
+par(mfrow = c(1,2))
+plot(net, main = "Pre WoT")  #, displaylabels = TRUE)
+rnet <- as.network(rgnm(n = 1, nv = nodes, m = edges, mode = "graph"), directed = FALSE)
+plot(rnet, main = "Random Graph")  #, displaylabels = TRUE)
+```
+
+## Simulation
+```{r}
+sim_graphs <- rgnm(n = sim_n, nv = nodes, m = edges, mode = "graph")
+```
+
+### Degree distribution
+
+```{r}
+obs_degree <- degree(adj, gmode='graph')
+
+# What is g here?
+degrees <-degree(sim_graphs,g=c(1:sim_n), gmode='graph')# you can calculate the degree distributions for all graphs
+
+max.deg <- max(obs_degree, degrees)
+
+deg.sist <- cbind( matrix( colSums(degrees==0),sim_n,1),
+                  t(apply(degrees,2,function(x) tabulate(x, nbins=max.deg) ) ) )# when tabulating we need to add the number of isolates 
+matplot(c(0:(max.deg)), t(deg.sist) ,
+        type ='l',
+        main='Pre WoT: Simulated degree dist. vs observed degree dist.',
+        xlab = "Edge count",
+        ylab = "Frequency")
+
+obs_freq <- as.data.frame(table(obs_degree))
+# Define the range of numbers
+range_of_numbers <- 0:(max.deg+2)
+# Create an empty dataframe to hold the final frequency table
+freq_table <- data.frame(number = range_of_numbers, frequency = 0)
+# Update the frequencies for existing numbers
+freq_table$frequency[freq_table$number %in% obs_freq$obs_degree] <- obs_freq$Freq
+
+lines(freq_table$number, freq_table$frequency,col='grey',lwd=4)
+```
+
+
+### Calculate centrality and triad measures
+```{r}
+# Create data object with statistics for sim graphs
+dat <- statistics_estimator(sim_graphs)
+# summary(dat)
+# boxplot(dat %>% select(-Triads))
+
+#Calculate observed statistics
+degree_obs <- degree_centrality(net)
+closeness_obs <- closeness_centrality(net)
+betweenness_obs <- betweenness_centrality(net)
+triad_obs <- triad.census(net, mode = "graph")[,4]
+
+# Creating dataframe for the z-score for the observed statistics
+obs_to_add <- dat %>% 
+  summarise(
+    "Network" = "Pre WoT",
+    "Type" = "Terrorist",
+    "Nodes" = nodes,
+    "Density" = network.density(net),
+    "Degree_std" = (degree_obs-mean(Degree))/sd(Degree),
+    "Closeness_std" = (closeness_obs-mean(Closeness))/sd(Closeness),
+    "Betweenness_std" = (betweenness_obs-mean(Betweenness))/sd(Betweenness),
+    "Triadic_std" = (triad_obs - mean(Triads)) / sd(Triads)
+    )
+obs_to_add
+
+obs_z_score <- obs_z_score %>% 
+  add_row(obs_to_add)
+
+# std <- dat %>% 
+#   mutate(
+#     degree_std = (Degree - mean(Degree))/sd(Degree),
+#     closeness_std = (Closeness - mean(Closeness))/sd(Closeness),
+#     betweenness_std = (Betweenness - mean(Betweenness))/sd(Betweenness),
+#     triad_std = (Triads - mean(Triads)) / sd(Triads)
+#     ) %>% 
+#   select(degree_std, closeness_std, betweenness_std, triad_std)
+
+# boxplot(std)
+```
+
+
+# Post Al-Quaeda WoT
+
+## Reading in data and some small calculations
+```{r}
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Raw Data/ALQUAEDA")
+adj_m <- read.csv("wot_matrix.csv", header = T) %>% 
+  select(-X)
+class(adj_m)
+adj <- as.matrix(adj_m)
+isSymmetric.matrix(adj)
+```
+
+```{r}
+names <- c()
+for (i in 1:nrow(adj)) {
+  a <- paste("n", i, sep = "")
+  names <- c(names, a)
+}
+
+colnames(adj) <- rownames(adj) <- names
+isSymmetric.matrix(adj)
+class(adj)
+```
+
+## Network object
+```{r}
+net <- as.network(adj, directed = FALSE)
+class(net)
+nodes <- nrow(adj)
+edges <- network::network.edgecount(net)
+
+# Save the network object
+# setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Processed data")
+# saveRDS(net, file = "post_al_quaeda.rds")
+```
+
+### Plotting our network compared to a randomised network
+```{r}
+post_wot_plot <- plot(net, main = "Post WoT")  #, displaylabels = TRUE)
+par(mfrow = c(1,2))
+plot(net, main = "Post WoT")  #, displaylabels = TRUE)
+rnet <- as.network(rgnm(n = 1, nv = nodes, m = edges, mode = "graph"), directed = FALSE)
+plot(rnet, main = "Random Graph")  #, displaylabels = TRUE)
+```
+
+## Simulation
+```{r}
+sim_graphs <- rgnm(n = sim_n, nv = nodes, m = edges, mode = "graph")
+```
+
+### Degree distribution
+
+```{r}
+obs_degree <- degree(adj, gmode='graph')
+
+# What is g here?
+degrees <-degree(sim_graphs,g=c(1:sim_n), gmode='graph')# you can calculate the degree distributions for all graphs
+
+max.deg <- max(obs_degree, degrees)
+
+deg.sist <- cbind( matrix( colSums(degrees==0),sim_n,1),
+                  t(apply(degrees,2,function(x) tabulate(x, nbins=max.deg) ) ) )# when tabulating we need to add the number of isolates 
+matplot(c(0:(max.deg)), t(deg.sist) ,
+        type ='l',
+        main='Post WoT: Simulated degree dist. vs observed degree dist.',
+        xlab = "Edge count",
+        ylab = "Frequency")
+
+obs_freq <- as.data.frame(table(obs_degree))
+# Define the range of numbers
+range_of_numbers <- 0:(max.deg+2)
+# Create an empty dataframe to hold the final frequency table
+freq_table <- data.frame(number = range_of_numbers, frequency = 0)
+# Update the frequencies for existing numbers
+freq_table$frequency[freq_table$number %in% obs_freq$obs_degree] <- obs_freq$Freq
+
+lines(freq_table$number, freq_table$frequency,col='grey',lwd=4)
+```
+
+
+### Calculate centrality and triad measures
+```{r}
+# Create data object with statistics for sim graphs
+dat <- statistics_estimator(sim_graphs)
+# summary(dat)
+# boxplot(dat %>% select(-Triads))
+
+#Calculate observed statistics
+degree_obs <- degree_centrality(net)
+closeness_obs <- closeness_centrality(net)
+betweenness_obs <- betweenness_centrality(net)
+triad_obs <- triad.census(net, mode = "graph")[,4]
+
+# Creating dataframe for the z-score for the observed statistics
+obs_to_add <- dat %>% 
+  summarise(
+    "Network" = "Post WoT",
+    "Type" = "Terrorist",
+    "Nodes" = nodes,
+    "Density" = network.density(net),
+    "Degree_std" = (degree_obs-mean(Degree))/sd(Degree),
+    "Closeness_std" = (closeness_obs-mean(Closeness))/sd(Closeness),
+    "Betweenness_std" = (betweenness_obs-mean(Betweenness))/sd(Betweenness),
+    "Triadic_std" = (triad_obs - mean(Triads)) / sd(Triads)
+    )
+obs_to_add
+
+obs_z_score <- obs_z_score %>% 
+  add_row(obs_to_add)
+
+# std <- dat %>% 
+#   mutate(
+#     degree_std = (Degree - mean(Degree))/sd(Degree),
+#     closeness_std = (Closeness - mean(Closeness))/sd(Closeness),
+#     betweenness_std = (Betweenness - mean(Betweenness))/sd(Betweenness),
+#     triad_std = (Triads - mean(Triads)) / sd(Triads)
+#     ) %>% 
+#   select(degree_std, closeness_std, betweenness_std, triad_std)
+
+# boxplot(std)
+```
+
+
+# IS-Europa
+
+## Reading in data and doing some data wrangling to create adjecency matrix
+```{r}
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Raw Data/IS-Europe")
+adj_m <- tibble(read.csv("ise_networkTieDetails.csv", header = T)) 
+class(adj_m)
+
+adj_m[str_detect(adj_m$n1,"Omar Isma�l Mostefa�"),1] <- "Omar Ismael Mostefai"
+adj_m[str_detect(adj_m$n1,"Mohamed Belka�d"),1] <- "Mohamed Belkaid"
+adj_m[str_detect(adj_m$n2,"Omar Isma�l Mostefa�"),2] <- "Omar Ismael Mostefai"
+adj_m[str_detect(adj_m$n2,"Mohamed Belka�d"),2] <- "Mohamed Belkaid"
+
+is_data <- adj_m %>% distinct(n1,n2)
+# Determine the number of unique nodes in the dataset
+nodes <- unique(c(is_data$n1, is_data$n2))
+num_nodes <- length(nodes)
+
+# Initialize an empty adjacency matrix
+adj_matrix <- matrix(0, nrow = num_nodes, ncol = num_nodes)
+colnames(adj_matrix) <- rownames(adj_matrix) <- nodes
+
+# Fill in the adjacency matrix based on the edges in the dataset
+for (i in 1:nrow(is_data)) {
+  n1 <- is_data$n1[i]
+  n2 <- is_data$n2[i]
+  adj_matrix[n1, n2] <- 1  # Mark the presence of an edge
+  adj_matrix[n2, n1] <- 1  # Assuming undirected network
+}
+diag(adj_matrix) <- 0
+# sum(adj_matrix)/2
+# view(adj_matrix)
+```
+
+
+
+
+```{r}
+adj <- as.matrix(adj_matrix)
+names <- c()
+for (i in 1:nrow(adj)) {
+  a <- paste("n", i, sep = "")
+  names <- c(names, a)
+}
+
+colnames(adj) <- rownames(adj) <- names
+isSymmetric.matrix(adj)
+class(adj)
+```
+
+## Network object
+```{r}
+net <- as.network(adj, directed = FALSE)
+class(net)
+nodes <- nrow(adj)
+edges <- network::network.edgecount(net)
+
+# Save the network object
+# setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Processed data")
+# saveRDS(net, file = "is_europe.rds")
+```
+
+```{r}
+# Density
+# sum(adj)/(nodes*(nodes-1))
+
+# Degree distribution
+# plot(table(colSums(adj)))
+```
+
+
+### Plotting our network compared to a randomised network
+```{r}
+is_plot <- plot(net, main = "IS-Europe")  #, displaylabels = TRUE)
+par(mfrow = c(1,2))
+plot(net, main = "IS-Europe")  #, displaylabels = TRUE)
+rnet <- as.network(rgnm(n = 1, nv = nodes, m = edges, mode = "graph"), directed = FALSE)
+plot(rnet, main = "Random Graph")  #, displaylabels = TRUE)
+```
+
+## Simulation
+```{r}
+sim_graphs <- rgnm(n = sim_n, nv = nodes, m = edges, mode = "graph")
+```
+
+### Degree distribution
+
+```{r}
+obs_degree <- degree(adj, gmode='graph')
+
+# What is g here?
+degrees <-degree(sim_graphs,g=c(1:sim_n), gmode='graph')# you can calculate the degree distributions for all graphs
+
+max.deg <- max(obs_degree, degrees)
+
+deg.sist <- cbind( matrix( colSums(degrees==0),sim_n,1),
+                  t(apply(degrees,2,function(x) tabulate(x, nbins=max.deg) ) ) )# when tabulating we need to add the number of isolates 
+matplot(c(0:(max.deg)), t(deg.sist) ,
+        type ='l',
+        main='IS-Europe: Simulated degree dist. vs observed degree dist.',
+        xlab = "Edge count",
+        ylab = "Frequency")
+
+obs_freq <- as.data.frame(table(obs_degree))
+# Define the range of numbers
+range_of_numbers <- 0:(max.deg+2)
+# Create an empty dataframe to hold the final frequency table
+freq_table <- data.frame(number = range_of_numbers, frequency = 0)
+# Update the frequencies for existing numbers
+freq_table$frequency[freq_table$number %in% obs_freq$obs_degree] <- obs_freq$Freq
+
+lines(freq_table$number, freq_table$frequency,col='grey',lwd=4)
+```
+
+
+### Calculate centrality and triad measures
+```{r}
+# Create data object with statistics for sim graphs
+dat <- statistics_estimator(sim_graphs)
+# summary(dat)
+# boxplot(dat %>% select(-Triads))
+
+#Calculate observed statistics
+degree_obs <- degree_centrality(net)
+closeness_obs <- closeness_centrality(net)
+betweenness_obs <- betweenness_centrality(net)
+triad_obs <- triad.census(net, mode = "graph")[,4]
+
+# Creating dataframe for the z-score for the observed statistics
+obs_to_add <- dat %>% 
+  summarise(
+    "Network" = "IS-Europe",
+    "Type" = "Terrorist",
+    "Nodes" = nodes,
+    "Density" = network.density(net),
+    "Degree_std" = (degree_obs-mean(Degree))/sd(Degree),
+    "Closeness_std" = (closeness_obs-mean(Closeness))/sd(Closeness),
+    "Betweenness_std" = (betweenness_obs-mean(Betweenness))/sd(Betweenness),
+    "Triadic_std" = (triad_obs - mean(Triads)) / sd(Triads)
+    )
+obs_to_add
+
+obs_z_score <- obs_z_score %>% 
+  add_row(obs_to_add)
+
+# std <- dat %>% 
+#   mutate(
+#     degree_std = (Degree - mean(Degree))/sd(Degree),
+#     closeness_std = (Closeness - mean(Closeness))/sd(Closeness),
+#     betweenness_std = (Betweenness - mean(Betweenness))/sd(Betweenness),
+#     triad_std = (Triads - mean(Triads)) / sd(Triads)
+#     ) %>% 
+#   select(degree_std, closeness_std, betweenness_std, triad_std)
+
+# boxplot(std)
+```
+
+# WT1, Woman Trafficking 1
+
+## Reading in data and some small calculations
+```{r}
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Raw Data/WTRAFFICKING")
+adj_m <- read.xlsx("WTA.xlsx", sheet = 1, colNames = T, rowNames = T) 
+adj <- as.matrix(adj_m)
+isSymmetric.matrix(adj)
+```
+
+```{r}
+names <- c()
+for (i in 1:nrow(adj)) {
+  a <- paste("n", i, sep = "")
+  names <- c(names, a)
+}
+
+colnames(adj) <- rownames(adj) <- names
+isSymmetric.matrix(adj)
+class(adj)
+```
+
+## Network object
+```{r}
+net <- as.network(adj, directed = FALSE)
+class(net)
+nodes <- nrow(adj)
+edges <- network::network.edgecount(net)
+
+# Save the network object
+# setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Processed data")
+# saveRDS(net, file = "wt1.rds")
+```
+
+### Plotting our network compared to a randomised network
+```{r}
+wt1_plot <- plot(net, main = "WT1")
+par(mfrow = c(1,2))
+plot(net, main = "WT1")  #, displaylabels = TRUE)
+rnet <- as.network(rgnm(n = 1, nv = nodes, m = edges, mode = "graph"), directed = FALSE)
+plot(rnet, main = "Random Graph")  #, displaylabels = TRUE)
+```
+
+## Simulation
+```{r}
+sim_graphs <- rgnm(n = sim_n, nv = nodes, m = edges, mode = "graph")
+```
+
+### Degree distribution
+
+```{r}
+obs_degree <- degree(adj, gmode='graph')
+
+# What is g here?
+degrees <-degree(sim_graphs,g=c(1:sim_n), gmode='graph')# you can calculate the degree distributions for all graphs
+
+max.deg <- max(obs_degree, degrees)
+
+deg.sist <- cbind( matrix( colSums(degrees==0),sim_n,1),
+                  t(apply(degrees,2,function(x) tabulate(x, nbins=max.deg) ) ) )# when tabulating we need to add the number of isolates 
+matplot(c(0:(max.deg)), t(deg.sist) ,
+        type ='l',
+        main='WT1: Simulated degree dist. vs observed degree dist.',
+        xlab = "Edge count",
+        ylab = "Frequency")
+
+obs_freq <- as.data.frame(table(obs_degree))
+# Define the range of numbers
+range_of_numbers <- 0:(max.deg+2)
+# Create an empty dataframe to hold the final frequency table
+freq_table <- data.frame(number = range_of_numbers, frequency = 0)
+# Update the frequencies for existing numbers
+freq_table$frequency[freq_table$number %in% obs_freq$obs_degree] <- obs_freq$Freq
+
+lines(freq_table$number, freq_table$frequency,col='grey',lwd=4)
+```
+
+
+### Calculate centrality and triad measures
+```{r}
+# Create data object with statistics for sim graphs
+dat <- statistics_estimator(sim_graphs)
+# summary(dat)
+# boxplot(dat %>% select(-Triads))
+
+#Calculate observed statistics
+degree_obs <- degree_centrality(net)
+closeness_obs <- closeness_centrality(net)
+betweenness_obs <- betweenness_centrality(net)
+triad_obs <- triad.census(net, mode = "graph")[,4]
+
+# Creating dataframe for the z-score for the observed statistics
+obs_to_add <- dat %>% 
+  summarise(
+    "Network" = "WT1",
+    "Type" = "Criminal",
+    "Nodes" = nodes,
+    "Density" = network.density(net),
+    "Degree_std" = (degree_obs-mean(Degree))/sd(Degree),
+    "Closeness_std" = (closeness_obs-mean(Closeness))/sd(Closeness),
+    "Betweenness_std" = (betweenness_obs-mean(Betweenness))/sd(Betweenness),
+    "Triadic_std" = (triad_obs - mean(Triads)) / sd(Triads)
+    )
+obs_to_add
+
+obs_z_score <- obs_z_score %>% 
+  add_row(obs_to_add)
+
+# std <- dat %>% 
+#   mutate(
+#     degree_std = (Degree - mean(Degree))/sd(Degree),
+#     closeness_std = (Closeness - mean(Closeness))/sd(Closeness),
+#     betweenness_std = (Betweenness - mean(Betweenness))/sd(Betweenness),
+#     triad_std = (Triads - mean(Triads)) / sd(Triads)
+#     ) %>% 
+#   select(degree_std, closeness_std, betweenness_std, triad_std)
+
+# boxplot(std)
+```
+
+
+
+
+
+
+
+# WT2
+
+## Reading in data and some small calculations
+```{r}
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Raw Data/WTRAFFICKING")
+adj_m <- read.xlsx("WTB.xlsx", sheet = 1, colNames = T, rowNames = T) 
+adj <- as.matrix(adj_m)
+isSymmetric.matrix(adj)
+```
+
+```{r}
+names <- c()
+for (i in 1:nrow(adj)) {
+  a <- paste("n", i, sep = "")
+  names <- c(names, a)
+}
+
+colnames(adj) <- rownames(adj) <- names
+isSymmetric.matrix(adj)
+class(adj)
+```
+
+## Network object
+```{r}
+net <- as.network(adj, directed = FALSE)
+class(net)
+nodes <- nrow(adj)
+edges <- network::network.edgecount(net)
+
+# Save the network object
+# setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Processed data")
+# saveRDS(net, file = "wt2.rds")
+```
+
+### Plotting our network compared to a randomised network
+```{r}
+wt2_plot <- plot(net, main = "WT2")
+par(mfrow = c(1,2))
+plot(net, main = "WT2")  #, displaylabels = TRUE)
+rnet <- as.network(rgnm(n = 1, nv = nodes, m = edges, mode = "graph"), directed = FALSE)
+plot(rnet, main = "Random Graph")  #, displaylabels = TRUE)
+```
+
+## Simulation
+```{r}
+sim_graphs <- rgnm(n = sim_n, nv = nodes, m = edges, mode = "graph")
+```
+
+### Degree distribution
+
+```{r}
+obs_degree <- degree(adj, gmode='graph')
+
+# What is g here?
+degrees <-degree(sim_graphs,g=c(1:sim_n), gmode='graph')# you can calculate the degree distributions for all graphs
+
+max.deg <- max(obs_degree, degrees)
+
+deg.sist <- cbind( matrix( colSums(degrees==0),sim_n,1),
+                  t(apply(degrees,2,function(x) tabulate(x, nbins=max.deg) ) ) )# when tabulating we need to add the number of isolates 
+matplot(c(0:(max.deg)), t(deg.sist) ,
+        type ='l',
+        main='WT2: Simulated degree dist. vs observed degree dist.',
+        xlab = "Edge count",
+        ylab = "Frequency")
+
+obs_freq <- as.data.frame(table(obs_degree))
+# Define the range of numbers
+range_of_numbers <- 0:(max.deg+2)
+# Create an empty dataframe to hold the final frequency table
+freq_table <- data.frame(number = range_of_numbers, frequency = 0)
+# Update the frequencies for existing numbers
+freq_table$frequency[freq_table$number %in% obs_freq$obs_degree] <- obs_freq$Freq
+
+lines(freq_table$number, freq_table$frequency,col='grey',lwd=4)
+```
+
+
+### Calculate centrality and triad measures
+```{r}
+# Create data object with statistics for sim graphs
+dat <- statistics_estimator(sim_graphs)
+# summary(dat)
+# boxplot(dat %>% select(-Triads))
+
+#Calculate observed statistics
+degree_obs <- degree_centrality(net)
+closeness_obs <- closeness_centrality(net)
+betweenness_obs <- betweenness_centrality(net)
+triad_obs <- triad.census(net, mode = "graph")[,4]
+
+# Creating dataframe for the z-score for the observed statistics
+obs_to_add <- dat %>% 
+  summarise(
+    "Network" = "WT2",
+    "Type" = "Criminal",
+    "Nodes" = nodes,
+    "Density" = network.density(net),
+    "Degree_std" = (degree_obs-mean(Degree))/sd(Degree),
+    "Closeness_std" = (closeness_obs-mean(Closeness))/sd(Closeness),
+    "Betweenness_std" = (betweenness_obs-mean(Betweenness))/sd(Betweenness),
+    "Triadic_std" = (triad_obs - mean(Triads)) / sd(Triads)
+    )
+obs_to_add
+
+obs_z_score <- obs_z_score %>% 
+  add_row(obs_to_add)
+
+# std <- dat %>% 
+#   mutate(
+#     degree_std = (Degree - mean(Degree))/sd(Degree),
+#     closeness_std = (Closeness - mean(Closeness))/sd(Closeness),
+#     betweenness_std = (Betweenness - mean(Betweenness))/sd(Betweenness),
+#     triad_std = (Triads - mean(Triads)) / sd(Triads)
+#     ) %>% 
+#   select(degree_std, closeness_std, betweenness_std, triad_std)
+# 
+# boxplot(std)
+```
+
+
+# WT3 (?)
+
+## Reading in data and some small calculations
+```{r}
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Raw Data/WTRAFFICKING")
+adj_m <- read.xlsx("WTC.xlsx", sheet = 1, colNames = T, rowNames = T) 
+adj <- as.matrix(adj_m)
+isSymmetric.matrix(adj)
+```
+
+```{r}
+names <- c()
+for (i in 1:nrow(adj)) {
+  a <- paste("n", i, sep = "")
+  names <- c(names, a)
+}
+
+colnames(adj) <- rownames(adj) <- names
+isSymmetric.matrix(adj)
+class(adj)
+```
+
+
+## Network object
+```{r}
+net <- as.network(adj, directed = FALSE)
+class(net)
+nodes <- nrow(adj)
+edges <- network::network.edgecount(net)
+
+# Save the network object
+# setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Processed data")
+# saveRDS(net, file = "wt3.rds")
+```
+
+### Plotting our network compared to a randomised network
+```{r}
+wt3_plot <- plot(net, main = "WT3")
+par(mfrow = c(1,2))
+plot(net, main = "WT3")  #, displaylabels = TRUE)
+rnet <- as.network(rgnm(n = 1, nv = nodes, m = edges, mode = "graph"), directed = FALSE)
+plot(rnet, main = "Random Graph")  #, displaylabels = TRUE)
+```
+
+## Simulation
+```{r}
+sim_graphs <- rgnm(n = sim_n, nv = nodes, m = edges, mode = "graph")
+```
+
+### Degree distribution
+
+```{r}
+obs_degree <- degree(adj, gmode='graph')
+
+# What is g here?
+degrees <-degree(sim_graphs,g=c(1:sim_n), gmode='graph')# you can calculate the degree distributions for all graphs
+
+max.deg <- max(obs_degree, degrees)
+
+deg.sist <- cbind( matrix( colSums(degrees==0),sim_n,1),
+                  t(apply(degrees,2,function(x) tabulate(x, nbins=max.deg) ) ) )# when tabulating we need to add the number of isolates 
+matplot(c(0:(max.deg)), t(deg.sist) ,
+        type ='l',
+        main='WT3: Simulated degree dist. vs observed degree dist.',
+        xlab = "Edge count",
+        ylab = "Frequency")
+
+obs_freq <- as.data.frame(table(obs_degree))
+# Define the range of numbers
+range_of_numbers <- 0:(max.deg+2)
+# Create an empty dataframe to hold the final frequency table
+freq_table <- data.frame(number = range_of_numbers, frequency = 0)
+# Update the frequencies for existing numbers
+freq_table$frequency[freq_table$number %in% obs_freq$obs_degree] <- obs_freq$Freq
+
+lines(freq_table$number, freq_table$frequency,col='grey',lwd=4)
+```
+
+
+### Calculate centrality and triad measures
+```{r}
+# Create data object with statistics for sim graphs
+dat <- statistics_estimator(sim_graphs)
+# summary(dat)
+# boxplot(dat %>% select(-Triads))
+
+#Calculate observed statistics
+degree_obs <- degree_centrality(net)
+closeness_obs <- closeness_centrality(net)
+betweenness_obs <- betweenness_centrality(net)
+triad_obs <- triad.census(net, mode = "graph")[,4]
+
+# Creating dataframe for the z-score for the observed statistics
+obs_to_add <- dat %>% 
+  summarise(
+    "Network" = "WT3",
+    "Type" = "Criminal",
+    "Nodes" = nodes,
+    "Density" = network.density(net),
+    "Degree_std" = (degree_obs-mean(Degree))/sd(Degree),
+    "Closeness_std" = (closeness_obs-mean(Closeness))/sd(Closeness),
+    "Betweenness_std" = (betweenness_obs-mean(Betweenness))/sd(Betweenness),
+    "Triadic_std" = (triad_obs - mean(Triads)) / sd(Triads)
+    )
+obs_to_add
+
+obs_z_score <- obs_z_score %>% 
+  add_row(obs_to_add)
+
+# std <- dat %>% 
+#   mutate(
+#     degree_std = (Degree - mean(Degree))/sd(Degree),
+#     closeness_std = (Closeness - mean(Closeness))/sd(Closeness),
+#     betweenness_std = (Betweenness - mean(Betweenness))/sd(Betweenness),
+#     triad_std = (Triads - mean(Triads)) / sd(Triads)
+#     ) %>% 
+#   select(degree_std, closeness_std, betweenness_std, triad_std)
+# 
+# boxplot(std)
+```
+
+# WT4
+
+## Reading in data and some small calculations
+```{r}
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Raw Data/WTRAFFICKING")
+adj_m <- read.xlsx("WTD.xlsx", sheet = 1, colNames = T, rowNames = T) 
+adj <- as.matrix(adj_m)
+isSymmetric.matrix(adj)
+```
+
+```{r}
+names <- c()
+for (i in 1:nrow(adj)) {
+  a <- paste("n", i, sep = "")
+  names <- c(names, a)
+}
+
+colnames(adj) <- rownames(adj) <- names
+isSymmetric.matrix(adj)
+class(adj)
+```
+
+## Network object
+```{r}
+net <- as.network(adj, directed = FALSE)
+class(net)
+nodes <- nrow(adj)
+edges <- network::network.edgecount(net)
+
+# Save the network object
+# setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Processed data")
+# saveRDS(net, file = "wt4.rds")
+```
+
+### Plotting our network compared to a randomised network
+```{r}
+wt4_plot <- plot(net, main = "WT4")
+par(mfrow = c(1,2))
+plot(net, main = "WT4")  #, displaylabels = TRUE)
+rnet <- as.network(rgnm(n = 1, nv = nodes, m = edges, mode = "graph"), directed = FALSE)
+plot(rnet, main = "Random Graph")  #, displaylabels = TRUE)
+```
+
+## Simulation
+```{r}
+sim_graphs <- rgnm(n = sim_n, nv = nodes, m = edges, mode = "graph")
+```
+
+### Degree distribution
+
+```{r}
+obs_degree <- degree(adj, gmode='graph')
+
+# What is g here?
+degrees <-degree(sim_graphs,g=c(1:sim_n), gmode='graph')# you can calculate the degree distributions for all graphs
+
+max.deg <- max(obs_degree, degrees)
+
+deg.sist <- cbind( matrix( colSums(degrees==0),sim_n,1),
+                  t(apply(degrees,2,function(x) tabulate(x, nbins=max.deg) ) ) )# when tabulating we need to add the number of isolates 
+matplot(c(0:(max.deg)), t(deg.sist) ,
+        type ='l',
+        main='WT1: Simulated degree dist. vs observed degree dist.',
+        xlab = "Edge count",
+        ylab = "Frequency")
+
+obs_freq <- as.data.frame(table(obs_degree))
+# Define the range of numbers
+range_of_numbers <- 0:(max.deg+2)
+# Create an empty dataframe to hold the final frequency table
+freq_table <- data.frame(number = range_of_numbers, frequency = 0)
+# Update the frequencies for existing numbers
+freq_table$frequency[freq_table$number %in% obs_freq$obs_degree] <- obs_freq$Freq
+
+lines(freq_table$number, freq_table$frequency,col='grey',lwd=4)
+```
+
+
+### Calculate centrality and triad measures
+```{r}
+# Create data object with statistics for sim graphs
+dat <- statistics_estimator(sim_graphs)
+# summary(dat)
+# boxplot(dat %>% select(-Triads))
+
+#Calculate observed statistics
+degree_obs <- degree_centrality(net)
+closeness_obs <- closeness_centrality(net)
+betweenness_obs <- betweenness_centrality(net)
+triad_obs <- triad.census(net, mode = "graph")[,4]
+
+# Creating dataframe for the z-score for the observed statistics
+obs_to_add <- dat %>% 
+  summarise(
+    "Network" = "WT4",
+    "Type" = "Criminal",
+    "Nodes" = nodes,
+    "Density" = network.density(net),
+    "Degree_std" = (degree_obs-mean(Degree))/sd(Degree),
+    "Closeness_std" = (closeness_obs-mean(Closeness))/sd(Closeness),
+    "Betweenness_std" = (betweenness_obs-mean(Betweenness))/sd(Betweenness),
+    "Triadic_std" = (triad_obs - mean(Triads)) / sd(Triads)
+    )
+obs_to_add
+
+obs_z_score <- obs_z_score %>% 
+  add_row(obs_to_add)
+
+# std <- dat %>% 
+#   mutate(
+#     degree_std = (Degree - mean(Degree))/sd(Degree),
+#     closeness_std = (Closeness - mean(Closeness))/sd(Closeness),
+#     betweenness_std = (Betweenness - mean(Betweenness))/sd(Betweenness),
+#     triad_std = (Triads - mean(Triads)) / sd(Triads)
+#     ) %>% 
+#   select(degree_std, closeness_std, betweenness_std, triad_std)
+
+# boxplot(std)
+```
+
+# WT5
+
+## Reading in data and some small calculations
+```{r}
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Raw Data/WTRAFFICKING")
+adj_m <- read.xlsx("WTE.xlsx", sheet = 1, colNames = T, rowNames = T) 
+adj <- as.matrix(adj_m)
+isSymmetric.matrix(adj)
+```
+
+```{r}
+names <- c()
+for (i in 1:nrow(adj)) {
+  a <- paste("n", i, sep = "")
+  names <- c(names, a)
+}
+
+colnames(adj) <- rownames(adj) <- names
+isSymmetric.matrix(adj)
+class(adj)
+```
+
+## Network object
+```{r}
+net <- as.network(adj, directed = FALSE)
+class(net)
+nodes <- nrow(adj)
+edges <- network::network.edgecount(net)
+
+# Save the network object
+# setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Processed data")
+# saveRDS(net, file = "wt5.rds")
+```
+
+### Plotting our network compared to a randomised network
+```{r}
+wt5_plot <- plot(net, main = "WT5")
+par(mfrow = c(1,2))
+plot(net, main = "WT5")  #, displaylabels = TRUE)
+rnet <- as.network(rgnm(n = 1, nv = nodes, m = edges, mode = "graph"), directed = FALSE)
+plot(rnet, main = "Random Graph")  #, displaylabels = TRUE)
+```
+
+## Simulation
+```{r}
+sim_graphs <- rgnm(n = sim_n, nv = nodes, m = edges, mode = "graph")
+```
+
+### Degree distribution
+
+```{r}
+obs_degree <- degree(adj, gmode='graph')
+
+# What is g here?
+degrees <-degree(sim_graphs,g=c(1:sim_n), gmode='graph')# you can calculate the degree distributions for all graphs
+
+max.deg <- max(obs_degree, degrees)
+
+deg.sist <- cbind( matrix( colSums(degrees==0),sim_n,1),
+                  t(apply(degrees,2,function(x) tabulate(x, nbins=max.deg) ) ) )# when tabulating we need to add the number of isolates 
+matplot(c(0:(max.deg)), t(deg.sist) ,
+        type ='l',
+        main='WT5: Simulated degree dist. vs observed degree dist.',
+        xlab = "Edge count",
+        ylab = "Frequency")
+
+obs_freq <- as.data.frame(table(obs_degree))
+# Define the range of numbers
+range_of_numbers <- 0:(max.deg+2)
+# Create an empty dataframe to hold the final frequency table
+freq_table <- data.frame(number = range_of_numbers, frequency = 0)
+# Update the frequencies for existing numbers
+freq_table$frequency[freq_table$number %in% obs_freq$obs_degree] <- obs_freq$Freq
+
+lines(freq_table$number, freq_table$frequency,col='grey',lwd=4)
+```
+
+
+### Calculate centrality and triad measures
+```{r}
+# Create data object with statistics for sim graphs
+dat <- statistics_estimator(sim_graphs)
+# summary(dat)
+# boxplot(dat %>% select(-Triads))
+
+#Calculate observed statistics
+degree_obs <- degree_centrality(net)
+closeness_obs <- closeness_centrality(net)
+betweenness_obs <- betweenness_centrality(net)
+triad_obs <- triad.census(net, mode = "graph")[,4]
+
+# Creating dataframe for the z-score for the observed statistics
+obs_to_add <- dat %>% 
+  summarise(
+    "Network" = "WT5",
+    "Type" = "Criminal",
+    "Nodes" = nodes,
+    "Density" = network.density(net),
+    "Degree_std" = (degree_obs-mean(Degree))/sd(Degree),
+    "Closeness_std" = (closeness_obs-mean(Closeness))/sd(Closeness),
+    "Betweenness_std" = (betweenness_obs-mean(Betweenness))/sd(Betweenness),
+    "Triadic_std" = (triad_obs - mean(Triads)) / sd(Triads)
+    )
+obs_to_add
+
+obs_z_score <- obs_z_score %>% 
+  add_row(obs_to_add)
+
+# std <- dat %>% 
+#   mutate(
+#     degree_std = (Degree - mean(Degree))/sd(Degree),
+#     closeness_std = (Closeness - mean(Closeness))/sd(Closeness),
+#     betweenness_std = (Betweenness - mean(Betweenness))/sd(Betweenness),
+#     triad_std = (Triads - mean(Triads)) / sd(Triads)
+#     ) %>% 
+#   select(degree_std, closeness_std, betweenness_std, triad_std)
+# 
+# boxplot(std)
+```
+# ERGEKON (directed)
+
+## Reading in data and some small calculations
+```{r}
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Raw Data/ERGEKON")
+adj_m <- read.xlsx("cezalara gore attributes centralityler bir tabloda-1.xlsx", 
+                   sheet = 6, colNames = T) 
+adj <- adj_m[-1, -(1:2)]
+rownames(adj) <- colnames(adj)
+
+adj <- as.matrix(adj)
+names <- c()
+for (i in 1:nrow(adj)) {
+  a <- paste("n", i, sep = "")
+  names <- c(names, a)
+}
+
+colnames(adj) <- rownames(adj) <- names
+isSymmetric.matrix(adj)
+```
+
+
+### Convering to an undirected graph
+
+```{r}
+igraph_net <- igraph::graph_from_adjacency_matrix(adj, mode = "directed")
+igraph_net <- igraph::as.undirected(igraph_net, mode = "collapse")
+igraph_adj <- as.matrix(igraph::as_adj(igraph_net))
+
+adj <- igraph_adj
+isSymmetric.matrix(adj)
+```
+
+
+## Network object
+```{r}
+net <- as.network(adj, directed = FALSE)
+class(net)
+nodes <- nrow(adj)
+edges <- network::network.edgecount(net)
+
+#Save the network object
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Processed data")
+saveRDS(net, file = "ergekon.rds")
+```
+
+### Plotting our network compared to a randomised network
+```{r}
+togo_plot <- plot(net, main = "Ergekon") 
+par(mfrow = c(1,2))
+plot(net, main = "Ergekon")  #, displaylabels = TRUE)
+rnet <- as.network(rgnm(n = 1, nv = nodes, m = edges, mode = "graph"), directed = FALSE)
+plot(rnet, main = "Random Graph")  #, displaylabels = TRUE)
+```
+
+## Simulation
+```{r}
+sim_graphs <- rgnm(n = sim_n, nv = nodes, m = edges, mode = "graph")
+```
+
+### Degree distribution
+
+```{r}
+obs_degree <- degree(adj, gmode='graph')
+
+# What is g here?
+degrees <-degree(sim_graphs,g=c(1:sim_n), gmode='graph')# you can calculate the degree distributions for all graphs
+
+max.deg <- max(obs_degree, degrees)
+
+deg.sist <- cbind( matrix( colSums(degrees==0),sim_n,1),
+                  t(apply(degrees,2,function(x) tabulate(x, nbins=max.deg) ) ) )# when tabulating we need to add the number of isolates 
+matplot(c(0:(max.deg)), t(deg.sist) ,
+        type ='l',
+        main='Ergekon: Simulated degree dist. vs observed degree dist.',
+        xlab = "Edge count",
+        ylab = "Frequency")
+
+obs_freq <- as.data.frame(table(obs_degree))
+# Define the range of numbers
+range_of_numbers <- 0:(max.deg+2)
+# Create an empty dataframe to hold the final frequency table
+freq_table <- data.frame(number = range_of_numbers, frequency = 0)
+# Update the frequencies for existing numbers
+freq_table$frequency[freq_table$number %in% obs_freq$obs_degree] <- obs_freq$Freq
+
+lines(freq_table$number, freq_table$frequency,col='grey',lwd=4)
+```
+
+
+### Calculate centrality and triad measures
+```{r}
+# Create data object with statistics for sim graphs
+dat <- statistics_estimator(sim_graphs)
+# summary(dat)
+# boxplot(dat %>% select(-Triads))
+
+#Calculate observed statistics
+degree_obs <- degree_centrality(net)
+closeness_obs <- closeness_centrality(net)
+betweenness_obs <- betweenness_centrality(net)
+triad_obs <- triad.census(net, mode = "graph")[,4]
+
+# Creating dataframe for the z-score for the observed statistics
+obs_to_add <- dat %>% 
+  summarise(
+    "Network" = "Ergekon",
+    "Type" = "Terrorist",
+    "Nodes" = nodes,
+    "Density" = network.density(net),
+    "Degree_std" = (degree_obs-mean(Degree))/sd(Degree),
+    "Closeness_std" = (closeness_obs-mean(Closeness))/sd(Closeness),
+    "Betweenness_std" = (betweenness_obs-mean(Betweenness))/sd(Betweenness),
+    "Triadic_std" = (triad_obs - mean(Triads)) / sd(Triads)
+    )
+obs_to_add
+
+obs_z_score <- obs_z_score %>% 
+  add_row(obs_to_add)
+
+# std <- dat %>% 
+#   mutate(
+#     degree_std = (Degree - mean(Degree))/sd(Degree),
+#     closeness_std = (Closeness - mean(Closeness))/sd(Closeness),
+#     betweenness_std = (Betweenness - mean(Betweenness))/sd(Betweenness),
+#     triad_std = (Triads - mean(Triads)) / sd(Triads)
+#     ) %>% 
+#   select(degree_std, closeness_std, betweenness_std, triad_std)
+
+# boxplot(std)
+```
+
+
+
+
+# GRAPHING THE NETWORKS
+
+
+## Prepare and save the data
+```{r}
+obs_z_score <- as_tibble(obs_z_score)
+obs_z_score$Data <- as.factor(obs_z_score$Network)
+obs_z_score$Type <- as.factor(obs_z_score$Type)
+```
+
+
+```{r}
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Plots")
+save(obs_z_score, file = "Descriptive data table.Rda")
+```
+
+
+
+## Individual boxplots for the statistics
+
+### Degree Centrality
+
+```{r}
+# obs_z_score %>% 
+#   ggplot(aes(y = Degree_std, x = Type, col = Type)) +
+#   geom_point() 
+#   #geom_text(label = obs_z_score$Network)
+
+degree_c_dotplot <- obs_z_score %>% 
+  ggdotplot(x = "Type", y = "Degree_std") +
+  theme(axis.title.x=element_blank())
+```
+
+
+```{r}
+degree_c_boxplot <-  ggplot(obs_z_score, aes(y = Degree_std, x = Type)) +
+  geom_boxplot(outlier.size = 0.8) +
+  geom_dotplot(binaxis = 'y', 
+                 dotsize = 1.2, 
+                 stackdir = 'center', alpha = .5) +
+  theme_classic() +
+  theme(axis.title.x=element_blank())
+  #geom_text(label = obs_z_score$Network)
+```
+
+### Closeness Centrality
+
+```{r}
+# obs_z_score %>% 
+#   ggplot(aes(y = Closeness_std, x = Type, col = Type)) +
+#   geom_point() 
+#   #geom_text(label = obs_z_score$Network)
+
+closeness_c_dotplot <- obs_z_score %>% 
+  ggdotplot(x = "Type", y = "Closeness_std") +
+  theme(axis.title.x=element_blank())
+
+```
+
+```{r}
+closeness_c_boxplot <- obs_z_score %>% 
+  ggplot(aes(y = Closeness_std, x = Type)) +
+  geom_boxplot(outlier.size = 0.8) +
+  geom_dotplot(binaxis = 'y', 
+                 dotsize = 1.2, 
+                 stackdir = 'center', alpha = .5) +
+  theme_classic() +
+  theme(axis.title.x=element_blank())
+  #geom_text(label = obs_z_score$Network)
+```
+
+### Betweeness Centrality
+
+```{r}
+# obs_z_score %>% 
+#   ggplot(aes(y = Betweenness_std, x = Type, col = Type)) +
+#   geom_point() 
+#   #geom_text(label = obs_z_score$Network)
+
+betweeness_c_dotplot <- obs_z_score %>% 
+  ggdotplot(x = "Type", y = "Betweenness_std") +
+  theme(axis.title.x=element_blank())
+```
+
+```{r}
+betweeness_c_boxplot <- obs_z_score %>% 
+  ggplot(aes(y = Betweenness_std, x = Type)) +
+  geom_boxplot(outlier.size = 0.8) +
+  geom_dotplot(binaxis = 'y', 
+                 dotsize = 1.2, 
+                 stackdir = 'center', alpha = .5) +
+  theme_classic() +
+  theme(axis.title.x=element_blank())
+  #geom_text(label = obs_z_score$Network)
+```
+
+### Triadic closure centrality
+
+```{r}
+triad_closure_dotplot <- obs_z_score %>% 
+  ggdotplot(x = "Type", y = "Triadic_std") +
+  theme(axis.title.x=element_blank())
+```
+
+```{r}
+triad_closure_boxplot <- obs_z_score %>% 
+  ggplot(aes(y = Triadic_std, x = Type)) +
+  geom_boxplot(outlier.size = 0.8) +
+  geom_dotplot(binaxis = 'y', 
+                 dotsize = 1.2, 
+                 stackdir = 'center', alpha = .5) +
+  theme_classic() +
+  theme(axis.title.x=element_blank())
+  #geom_text(label = obs_z_score$Network)
+```
+## All boxplots and dotoplots
+
+```{r}
+boxplots <- ggarrange(degree_c_boxplot, closeness_c_boxplot,
+          betweeness_c_boxplot, triad_closure_boxplot, 
+          ncol = 2, nrow = 2)
+annotate_figure(boxplots, top = text_grob("Standardized Measures Boxplots", face = "bold", size = 14))
+
+```
+
+```{r}
+dotplots <- ggarrange(degree_c_dotplot, closeness_c_dotplot,
+          betweeness_c_dotplot, triad_closure_dotplot, 
+          ncol = 2, nrow = 2)
+annotate_figure(dotplots, top = text_grob("Standardized Measures Dotplots", face = "bold", size = 14))
+```
+
+
+
+## Two-way interactions
+
+```{r}
+degree_v_close <- obs_z_score %>% 
+  ggplot(aes(x = Degree_std, y = Closeness_std, col = Type)) +
+  geom_point() + 
+  theme_classic()
+degree_v_between <- obs_z_score %>% 
+  ggplot(aes(x = Degree_std, y = Betweenness_std, col = Type)) +
+  geom_point() + 
+  theme_classic()
+degree_v_triad <- obs_z_score %>% 
+  ggplot(aes(x = Degree_std, y = Triadic_std, col = Type)) +
+  geom_point() + 
+  theme_classic()
+close_v_between <- obs_z_score %>% 
+  ggplot(aes(x = Closeness_std, y = Betweenness_std, col = Type)) +
+  geom_point() + 
+  theme_classic()
+close_v_triad <- obs_z_score %>% 
+  ggplot(aes(x = Closeness_std, y = Triadic_std, col = Type)) +
+  geom_point() + 
+  theme_classic()
+between_v_triad <- obs_z_score %>% 
+  ggplot(aes(x = Betweenness_std, y = Triadic_std, col = Type)) +
+  geom_point() + 
+  theme_classic()
+
+#Change point shapes and colors by groups
+# ggplot(iris, aes(Sepal.Length, Sepal.Width)) +
+#   geom_point(aes(shape = Species, color = Species), size = 3) +
+#   scale_shape_manual(values = c(5, 16, 17)) +
+#   scale_color_manual(values = c("#00AFBB", "#E7B800", "#FC4E07"))+
+#   theme_minimal() +
+#   theme(legend.position = "top")
+
+ggarrange(degree_v_close, degree_v_between, degree_v_triad,
+          close_v_between, close_v_triad, between_v_triad,
+          common.legend = T, legend = "bottom")
+```
+## Average for the two types and big table
+```{r}
+average <- obs_z_score %>% 
+  group_by(Type) %>% 
+  summarise(
+    "N" = n(),
+    "Nodes" = mean(Nodes),
+    "Density" = mean(Density),
+    "Degree_std" = mean(Degree_std),
+    "Closeness_std" = mean(Closeness_std, na.rm = T),
+    "Betweenness_std" = mean(Betweenness_std),
+    "Triadic_std" = mean(Triadic_std),
+    )
+average
+average <- average %>% select(-N)
+
+
+```
+Variances
+```{r}
+obs_z_score %>% 
+  group_by(Type) %>% 
+  summarise(
+    "Degree sd" = sd(Degree_std),
+    "Closeness sd" = sd(Closeness_std, na.rm = T),
+    "Betweenness sd" = sd(Betweenness_std),
+    "Triadic sd" = sd(Triadic_std),
+    )
+```
+
+```{r}
+full_table <- obs_z_score %>% 
+  add_row(average) %>% 
+  select(-Data)
+
+full_table[20:21,1] <- "Average"
+full_table <- full_table %>% 
+ mutate_if(is.numeric, round, digits = 2)
+setwd("/Users/arvidhedebark/Documents/Masteruppsats/R/Plots")
+# write.table(full_table, file = "Descriptive Table")
+#write.csv(full_table, "Table.csv", row.names = F)
+```
+
+```{r}
+full_table %>%
+  kbl(caption="Summary Statistics of the Individual Networks",
+      format="latex",
+      col.names = c("Network","Type","Nodes","Density","Degree_std","Closeness_std", "Betweeness_std", "Triadic_std"),
+      align="r") %>%
+  kable_minimal(full_width = F,  html_font = "Source Sans Pro")
+```
+
+
+## Tests 
+
+```{r}
+# independence_test(Value ~ Group,
+#                   data = Data)
+```
+
+```{r}
+coin::independence_test(Betweenness_std ~ Type,
+                  data = obs_z_score)
+```
+
+```{r}
+coin::independence_test(Triadic_std ~ Type,
+                  data = obs_z_score)
+```
+
+```{r}
+coin::independence_test(Degree_std ~ Type,
+                  alternative = c("less"),
+                  data = obs_z_score)
+```
+```{r}
+coin::independence_test(Closeness_std ~ Type,
+                  alternative = c("less"),
+                  data = obs_z_score)
+```
+
+## Plot of the diffirent networks
+
+
+# Interactive graphs with plotly
+
+
+## New scatteplot
+```{r}
+p_degree <- obs_z_score %>% 
+  ggplot(aes(x = Type, y = Degree_std,
+             label = Network)) +
+  geom_point() + 
+  theme_classic()
+p_closeness <- obs_z_score %>% 
+  ggplot(aes(x = Type, y = Closeness_std,
+             label = Network)) +
+  geom_point() + 
+  theme_classic()
+p_between <- obs_z_score %>% 
+  ggplot(aes(x = Type, y = Betweenness_std,
+             label = Network)) +
+  geom_point() + 
+  theme_classic()
+p_triad <- obs_z_score %>% 
+  ggplot(aes(x = Type, y = Triadic_std,
+             label = Network)) +
+  geom_point() + 
+  theme_classic()
+
+plotly::subplot(p_degree, p_closeness, p_between,
+          p_triad, nrows = 2, titleY = TRUE)
+```
+
+
+
+
+## New two-way plots
+```{r}
+degree_v_close <- obs_z_score %>% 
+  ggplot(aes(x = Degree_std, y = Closeness_std, col = Type, 
+             label = Network)) +
+  geom_point() + 
+  theme_classic() +
+  theme(legend.position="none")
+degree_v_between <- obs_z_score %>% 
+  ggplot(aes(x = Degree_std, y = Betweenness_std, col = Type, 
+             label = Network)) +
+  geom_point() + 
+  theme_classic() +
+  theme(legend.position="none")
+degree_v_triad <- obs_z_score %>% 
+  ggplot(aes(x = Degree_std, y = Triadic_std, col = Type, 
+             label = Network)) +
+  geom_point() + 
+  theme_classic() +
+  theme(legend.position="none")
+close_v_between <- obs_z_score %>% 
+  ggplot(aes(x = Closeness_std, y = Betweenness_std, col = Type, 
+             label = Network)) +
+  geom_point() + 
+  theme_classic() +
+  theme(legend.position="none")
+close_v_triad <- obs_z_score %>% 
+  ggplot(aes(x = Closeness_std, y = Triadic_std, col = Type, 
+             label = Network)) +
+  geom_point() + 
+  theme_classic() +
+  theme(legend.position="none")
+between_v_triad <- obs_z_score %>% 
+  ggplot(aes(x = Betweenness_std, y = Triadic_std, col = Type, 
+             label = Network)) +
+  geom_point() + 
+  theme_classic() +
+  theme(legend.position="none")
+
+plotly::subplot(degree_v_close, degree_v_between, degree_v_triad,
+          close_v_between, close_v_triad, between_v_triad,
+        nrows = 2, titleX = TRUE, titleY = TRUE, margin = 0.07)
+```
+
+# Time for benchmark
+```{r}
+end_time <- Sys.time()
+end_time-start_time
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
