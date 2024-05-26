@@ -1,0 +1,1 @@
+Code used for creating my descriptive results and graphing the output from fitting the Bayesian hierchachical with the code from https://github.com/johankoskinen/BayesERGM/blob/main/hergm_bayes.R where many of the plotting functions can be found in the functions script.
